@@ -223,8 +223,12 @@ def update_details():
         if updated_sites != []:
             utilities.clear_profile_page_cache(record.stopstalk_handle)
             site_lrs = {}
+            nrtable = db.next_retrieval
             submission_query = (stable.user_id == session.user_id)
-            nrtable_record = db(db.next_retrieval.user_id == session.user_id).select().first()
+            nrtable_record = db(nrtable.user_id == session.user_id).select().first()
+            if nrtable_record is None:
+                nid = nrtable.insert(user_id=session.user_id)
+                nrtable_record = nrtable(nid)
             for site in updated_sites:
                 site_lrs[site.lower() + "_lr"] = current.INITIAL_DATE
                 nrtable_record.update({site.lower() + "_delay": 0})
@@ -341,7 +345,11 @@ def update_friend():
                 submission_query = (stable.custom_user_id == int(request.args[0]))
                 reset_sites = current.SITES if record.duplicate_cu else updated_sites
 
+                nrtable = db.next_retrieval
                 nrtable_record = db(db.next_retrieval.custom_user_id == int(request.args[0])).select().first()
+                if nrtable_record is None:
+                    nid = nrtable.insert(custom_user_id=int(request.args[0]))
+                    nrtable_record = nrtable(nid)
                 for site in reset_sites:
                     form.vars[site.lower() + "_lr"] = current.INITIAL_DATE
                     nrtable_record.update({site.lower() + "_delay": 0})
@@ -370,198 +378,6 @@ def update_friend():
         response.flash = T("Form has errors")
 
     return dict(form=form)
-
-# ------------------------------------------------------------------------------
-def get_dates():
-    """
-        Return a dictionary containing count of submissions
-        on each date
-    """
-
-    if request.extension != "json" or \
-       request.vars.user_id is None or \
-       request.vars.custom is None:
-        raise HTTP(400, "Bad request")
-        return
-
-    user_id = int(request.vars.user_id)
-    custom = (request.vars.custom == "True")
-
-    stopstalk_handle = utilities.get_stopstalk_handle(user_id, custom)
-    redis_cache_key = "get_dates_" + stopstalk_handle
-
-    # Check if data is present in REDIS
-    data = current.REDIS_CLIENT.get(redis_cache_key)
-    if data:
-        return json.loads(data)
-
-    if custom:
-        attribute = "submission.custom_user_id"
-    else:
-        attribute = "submission.user_id"
-
-    sql_query = """
-                    SELECT status, time_stamp, COUNT(*)
-                    FROM submission
-                    WHERE %s=%d
-                    GROUP BY DATE(submission.time_stamp), submission.status;
-                """ % (attribute, user_id)
-
-    row = db.executesql(sql_query)
-    total_submissions = {}
-
-    # For day streak
-    streak = max_streak = 0
-    prev = curr = None
-
-    # For accepted solutions streak
-    curr_accepted_streak = utilities.get_accepted_streak(user_id, custom)
-    max_accepted_streak = utilities.get_max_accepted_streak(user_id, custom)
-
-    for i in row:
-
-        if prev is None and streak == 0:
-            prev = time.strptime(str(i[1]), "%Y-%m-%d %H:%M:%S")
-            prev = datetime.date(prev.tm_year, prev.tm_mon, prev.tm_mday)
-            streak = 1
-        else:
-            curr = time.strptime(str(i[1]), "%Y-%m-%d %H:%M:%S")
-            curr = datetime.date(curr.tm_year, curr.tm_mon, curr.tm_mday)
-
-            if (curr - prev).days == 1:
-                streak += 1
-            elif curr != prev:
-                streak = 1
-
-            prev = curr
-
-        if streak > max_streak:
-            max_streak = streak
-
-        sub_date = str(i[1]).split()[0]
-        if total_submissions.has_key(sub_date):
-            total_submissions[sub_date][i[0]] = i[2]
-            total_submissions[sub_date]["count"] += i[2]
-        else:
-            total_submissions[sub_date] = {}
-            total_submissions[sub_date][i[0]] = i[2]
-            total_submissions[sub_date]["count"] = i[2]
-
-    today = datetime.datetime.today().date()
-
-    # Check if the last streak is continued till today
-    if prev is None or (today - prev).days > 1:
-        streak = 0
-
-    if custom is False:
-        uetable = db.user_editorials
-        query = (uetable.user_id == user_id) & \
-                (uetable.verification == "accepted")
-        user_editorials = db(query).select()
-
-        for editorial in user_editorials:
-            this_date = str(editorial.added_on).split()[0]
-            if total_submissions.has_key(this_date):
-                if total_submissions[this_date].has_key("EAC"):
-                    total_submissions[this_date]["EAC"] += 1
-                else:
-                    total_submissions[this_date]["EAC"] = 1
-                total_submissions[this_date]["count"] += 1
-            else:
-                total_submissions[this_date] = {"count": 1}
-                total_submissions[this_date]["EAC"] = 1
-
-    data = dict(total=total_submissions,
-                max_streak=max_streak,
-                curr_streak=streak,
-                curr_accepted_streak=curr_accepted_streak,
-                max_accepted_streak=max_accepted_streak)
-
-    current.REDIS_CLIENT.set(redis_cache_key,
-                             json.dumps(data, separators=(",", ":")),
-                             ex=5 * 60 * 60)
-    return data
-
-# ------------------------------------------------------------------------------
-def get_solved_counts():
-    """
-        Get the number of solved and attempted problems
-    """
-
-    if request.extension != "json" or \
-       request.vars.user_id is None or \
-       request.vars.custom is None:
-        raise HTTP(400, "Bad request")
-        return
-
-    user_id = int(request.vars.user_id)
-    custom = (request.vars.custom == "True")
-    stopstalk_handle = utilities.get_stopstalk_handle(user_id, custom)
-    redis_cache_key = "get_solved_counts_" + stopstalk_handle
-
-    # Check if data is present in REDIS
-    data = current.REDIS_CLIENT.get(redis_cache_key)
-    if data:
-        return json.loads(data)
-
-    stable = db.submission
-    query = (stable["custom_user_id" if custom else "user_id"] == user_id)
-
-    total_problems = db(query).count(distinct=stable.problem_link)
-    query &= (stable.status == "AC")
-    solved_problems = db(query).select(stable.problem_link, distinct=True)
-    site_counts = {}
-    for site in current.SITES:
-        site_counts[site.lower()] = 0
-    for problem in solved_problems:
-        site_counts[utilities.urltosite(problem.problem_link)] += 1
-
-    data = dict(total_problems=total_problems,
-                solved_problems=len(solved_problems),
-                site_counts=site_counts)
-
-    current.REDIS_CLIENT.set(redis_cache_key,
-                             json.dumps(data, separators=(",", ":")),
-                             ex=24 * 60 * 60)
-    return data
-
-# ------------------------------------------------------------------------------
-def get_stats():
-    """
-        Get statistics of the user
-    """
-
-    if request.extension != "json" or \
-       request.vars.user_id is None or \
-       request.vars.custom is None:
-        raise HTTP(400, "Bad request")
-        return
-
-    user_id = int(request.vars.user_id)
-    custom = (request.vars.custom == "True")
-    stopstalk_handle = utilities.get_stopstalk_handle(user_id, custom)
-    redis_cache_key = "get_stats_" + stopstalk_handle
-
-    # Check if data is present in REDIS
-    data = current.REDIS_CLIENT.get(redis_cache_key)
-    if data:
-        return json.loads(data)
-
-    stable = db.submission
-    count = stable.id.count()
-    query = (stable["custom_user_id" if custom else "user_id"] == user_id)
-    row = db(query).select(stable.status,
-                           count,
-                           groupby=stable.status)
-
-    result = dict(row=map(lambda x: (x["_extra"]["COUNT(submission.id)"],
-                                     x["submission"]["status"]),
-                          row.as_list()))
-
-    current.REDIS_CLIENT.set(redis_cache_key,
-                             json.dumps(result, separators=(",", ":")),
-                             ex=24 * 60 * 60)
-    return result
 
 # ------------------------------------------------------------------------------
 def get_activity():
@@ -719,7 +535,7 @@ def get_solved_unsolved():
     all_tags = db(ttable).select()
     all_tags = dict([(tag.id, tag.value) for tag in all_tags])
 
-    query = ptable.link.belongs(solved_problems.union(unsolved_problems))
+    query = ptable.id.belongs(solved_problems.union(unsolved_problems))
     # id => [problem_link, problem_name, problem_class]
     # problem_class =>
     #    0 (Logged in user has solved the problem)
@@ -731,16 +547,16 @@ def get_solved_unsolved():
         pids.append(problem.id)
 
         problem_status = 2
-        if problem.link in user_unsolved_problems:
+        if problem.id in user_unsolved_problems:
             # Checking for unsolved first because most of the problem links
             # would be found here instead of a failed lookup in solved_problems
             problem_status = 1
-        elif problem.link in user_solved_problems:
+        elif problem.id in user_solved_problems:
             problem_status = 0
 
-        problem_details[problem.id] = [problem.link, problem.name, problem_status]
+        problem_details[problem.id] = [problem.link, problem.name, problem_status, problem.id]
 
-        if problem.link in solved_problems:
+        if problem.id in solved_problems:
             solved_ids.append(problem.id)
         else:
             unsolved_ids.append(problem.id)
@@ -796,7 +612,7 @@ def get_solved_unsolved():
                 if not category_found:
                     this_category = "Miscellaneous"
             pdetails = problem_details[pid]
-            plink, pname, _ = pdetails
+            plink, pname, _, _ = pdetails
             psite = utilities.urltosite(plink)
             if (pname, psite) not in displayed_problems:
                 displayed_problems.add((pname, psite))
@@ -805,41 +621,69 @@ def get_solved_unsolved():
 
     return dict(solved_problems=_get_categorized_json(solved_ids),
                 unsolved_problems=_get_categorized_json(unsolved_ids),
-                solved_html_widget=str(utilities.problem_widget("", "", "solved-problem", "Solved problem")),
-                unsolved_html_widget=str(utilities.problem_widget("", "", "unsolved-problem", "Unsolved problem")),
-                unattempted_html_widget=str(utilities.problem_widget("", "", "unattempted-problem", "Unattempted problem")))
+                solved_html_widget=str(utilities.problem_widget("", "", "solved-problem", "Solved problem", None)),
+                unsolved_html_widget=str(utilities.problem_widget("", "", "unsolved-problem", "Unsolved problem", None)),
+                unattempted_html_widget=str(utilities.problem_widget("", "", "unattempted-problem", "Unattempted problem", None)))
 
 # ------------------------------------------------------------------------------
-@auth.requires_login()
-def get_stopstalk_rating_history():
+def get_stopstalk_user_stats():
+    if request.extension != "json":
+        raise HTTP(400)
+        return
+
     user_id = request.vars.get("user_id", None)
     custom = request.vars.get("custom", None)
+
+    final_data = dict(
+        rating_history=[],
+        curr_accepted_streak=0,
+        max_accepted_streak=0,
+        curr_day_streak=0,
+        max_day_streak=0,
+        solved_counts={},
+        status_percentages=[],
+        site_accuracies={},
+        solved_problems_count=0,
+        total_problems_count=0,
+        calendar_data={}
+    )
+
     if user_id is None or custom is None:
-        return dict(final_rating=[])
+        return final_data
+
     user_id = int(user_id)
     custom = (custom == "True")
     stopstalk_handle = utilities.get_stopstalk_handle(user_id, custom)
-    redis_cache_key = "get_stopstalk_rating_history_" + stopstalk_handle
+    redis_cache_key = "profile_page:user_stats_" + stopstalk_handle
 
     # Check if data is present in REDIS
     data = current.REDIS_CLIENT.get(redis_cache_key)
     if data:
-        return json.loads(data)
+        result = json.loads(data)
+        if not auth.is_logged_in():
+            del result["rating_history"]
+        return result
 
     stable = db.submission
+
     query = (stable["custom_user_id" if custom else "user_id"] == user_id)
     rows = db(query).select(stable.time_stamp,
                             stable.problem_link,
+                            stable.problem_id,
                             stable.status,
                             stable.site,
                             orderby=stable.time_stamp)
 
-    final_rating = utilities.get_stopstalk_rating_history_dict(rows)
+    # Returns rating history, accepted & max streak (day and accepted),
+    result = utilities.get_stopstalk_user_stats(rows.as_list())
 
-    result = dict(final_rating=sorted(final_rating.items()))
-    current.REDIS_CLIENT.set(redis_cache_key,
-                             json.dumps(result, separators=(",", ":")),
-                             ex=1 * 60 * 60)
+    if auth.is_logged_in():
+        current.REDIS_CLIENT.set(redis_cache_key,
+                                 json.dumps(result, separators=(",", ":")),
+                                 ex=1 * 60 * 60)
+    else:
+        del result["rating_history"]
+
     return result
 
 # ------------------------------------------------------------------------------
@@ -959,35 +803,6 @@ def profile():
 
     output["flag"] = flag
 
-    rows = db(user_query).select(stable.site,
-                                 stable.status,
-                                 stable.id.count(),
-                                 groupby=[stable.site, stable.status])
-
-    data = {}
-    for site in current.SITES:
-        data[site] = [0, 0]
-
-    for i in rows:
-        submission = i.as_dict()
-        cnt = submission["_extra"]["COUNT(submission.id)"]
-        status = submission["submission"]["status"]
-        site = submission["submission"]["site"]
-
-        if status == "AC":
-            data[site][0] += cnt
-        data[site][1] += cnt
-
-    efficiency = {}
-    for i in data:
-        if data[i][0] == 0 or data[i][1] == 0:
-            efficiency[i] = "-"
-            continue
-        else:
-            efficiency[i] = "%.3f" % (data[i][0] * 100.0 / data[i][1])
-
-    output["efficiency"] = efficiency
-
     profile_urls = {}
     for site in current.SITES:
         profile_urls[site] = utilities.get_profile_url(site,
@@ -1035,7 +850,8 @@ def add_to_refresh_now():
         else:
             current.REDIS_CLIENT.rpush("next_retrieve_user", user_id)
 
-    row.update_record(refreshed_timestamp=datetime.datetime.now())
+    row.update_record(refreshed_timestamp=datetime.datetime.now(),
+                      graph_data_retrieved=False)
     update_params = {}
     for site in current.SITES:
         update_params[site.lower() + "_delay"] = 1

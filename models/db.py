@@ -406,6 +406,7 @@ def notify_institute_users(record):
     """
 
     atable = db.auth_user
+    iutable = db.institute_user
     query = (atable.institute == record.institute) & \
             (atable.email != record.email) & \
             (atable.institute != "Other") & \
@@ -414,8 +415,10 @@ def notify_institute_users(record):
 
     rows = db(query).select(atable.id)
     if len(rows):
-        query_values = ",".join([str((int(x.id), int(record.id))) for x in rows]).replace(" ", "")
-        db.executesql("INSERT INTO institute_user(send_to_id,user_registered_id) VALUES %s;" % query_values)
+        for row in rows:
+            iutable.insert(send_to_id=row.id,
+                           user_registered_id=record.id)
+            db.commit()
 
 def create_next_retrieval_record(record, custom=False):
     """
@@ -559,30 +562,6 @@ db.define_table("custom_friend",
                 format="%(first_name)s %(last_name)s (%(id)s)",
                 *custom_friend_fields)
 
-db.define_table("submission",
-                Field("user_id", "reference auth_user"),
-                Field("custom_user_id", "reference custom_friend"),
-                Field("stopstalk_handle"),
-                Field("site_handle"),
-                Field("site"),
-                Field("time_stamp", "datetime"),
-                Field("problem_name"),
-                Field("problem_link"),
-                Field("lang"),
-                Field("status"),
-                Field("points"),
-                Field("view_link",
-                      default=""))
-
-db.define_table("following",
-                Field("user_id", "reference auth_user"),
-                Field("follower_id", "reference auth_user"))
-
-db.define_table("todays_requests",
-                Field("user_id", "reference auth_user"),
-                Field("follower_id", "reference auth_user"),
-                Field("transaction_type"))
-
 def _count_users_lambda(row):
     if row.problem.user_ids in (None, ""):
         return 0
@@ -611,6 +590,31 @@ db.define_table("problem",
                 Field.Virtual("user_count", _count_users_lambda),
                 Field.Virtual("custom_user_count", _count_custom_users_lambda),
                 format="%(name)s %(id)s")
+
+db.define_table("submission",
+                Field("user_id", "reference auth_user"),
+                Field("custom_user_id", "reference custom_friend"),
+                Field("stopstalk_handle"),
+                Field("site_handle"),
+                Field("site"),
+                Field("time_stamp", "datetime"),
+                Field("problem_id", "reference problem"),
+                Field("problem_name"),
+                Field("problem_link"),
+                Field("lang"),
+                Field("status"),
+                Field("points"),
+                Field("view_link",
+                      default=""))
+
+db.define_table("following",
+                Field("user_id", "reference auth_user"),
+                Field("follower_id", "reference auth_user"))
+
+db.define_table("todays_requests",
+                Field("user_id", "reference auth_user"),
+                Field("follower_id", "reference auth_user"),
+                Field("transaction_type"))
 
 db.define_table("tag",
                 Field("value"),
@@ -763,8 +767,8 @@ current.db = db
 current.uvadb = uvadb
 
 current.WEIGHTING_FACTORS = {
-    "curr_streak": 100 * 10,
-    "max_streak": 80 * 10,
+    "curr_day_streak": 40 * 10,
+    "max_day_streak": 20 * 10,
     "solved": 1 * 23,
     "accuracy": 5 * 35,
     "attempted": 2 * 2,

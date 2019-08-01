@@ -38,6 +38,7 @@ atable = db.auth_user
 cftable = db.custom_friend
 nrtable = db.next_retrieval
 ptable = db.problem
+stable = db.submission
 
 SERVER_FAILURE = "SERVER_FAILURE"
 NOT_FOUND = "NOT_FOUND"
@@ -48,10 +49,11 @@ INVALID_HANDLES = None
 
 failed_user_retrievals = []
 retrieval_type = None
-plink_to_id = {}
 todays_date = datetime.datetime.today().date()
 uva_problem_dict = {}
 metric_handlers = {}
+plink_to_id = {}
+todays_date_string = datetime.datetime.now().strftime("%Y-%m-%d")
 
 # ==============================================================================
 class Logger:
@@ -83,26 +85,28 @@ class Logger:
                                   message)
 
 # -----------------------------------------------------------------------------
+def concurrent_submission_retrieval_handler(action, user_id, custom):
+    redis_key = "ongoing_submission_retrieval_"
+    redis_key += "custom_user_" if custom else "user_"
+    redis_key += str(user_id)
+
+    if action == "GET":
+        if current.REDIS_CLIENT.get(redis_key):
+            return "ONGOING"
+        else:
+            return "COMPLETED"
+    elif action == "SET":
+        current.REDIS_CLIENT.set(redis_key, True, ex=1 * 60 * 60)
+    elif action == "DEL":
+        current.REDIS_CLIENT.delete(redis_key)
+
+# -----------------------------------------------------------------------------
 def populate_uva_problems():
     global uva_problem_dict
 
     ptable = uvadb.problem
     uvaproblems = uvadb(ptable).select(ptable.problem_id, ptable.title)
     uva_problem_dict = dict([(x.problem_id, x.title) for x in uvaproblems])
-
-# -----------------------------------------------------------------------------
-def insert_this_batch():
-    global rows
-
-    columns = "(`user_id`, `custom_user_id`, `stopstalk_handle`, " + \
-              "`site_handle`, `site`, `time_stamp`, `problem_name`," + \
-              "`problem_link`, `lang`, `status`, `points`, `view_link`)"
-
-    if len(rows) != 0:
-        sql_query = """INSERT INTO `submission` """ + \
-                    columns + """ VALUES """ + \
-                    ",".join(rows) + """;"""
-        db.executesql(sql_query)
 
 # -----------------------------------------------------------------------------
 def flush_problem_stats():
@@ -252,61 +256,53 @@ def get_submissions(user_id,
         Get the submissions and populate the database
     """
 
-    db = current.db
     submission_count = len(submissions)
 
     if submission_count == 0:
         return submission_count
 
-    global rows
-
     for submission in submissions:
-        row = []
-        if custom:
-            row.extend(["--", user_id])
+        try:
+            pname = submission[2].encode("utf-8", "ignore")
+        except UnicodeDecodeError:
+            pname = str(pname)
+
+        pname = pname.replace("\"", "").replace("'", "")
+        plink = submission[1]
+        if plink not in plink_to_id:
+            pid = ptable.insert(name=pname,
+                                link=plink,
+                                editorial_link=None,
+                                tags="['-']",
+                                editorial_added_on=todays_date_string,
+                                tags_added_on=todays_date_string,
+                                user_ids="",
+                                custom_user_ids="")
+            plink_to_id[plink] = pid
         else:
-            row.extend([user_id, "--"])
+            pid = plink_to_id[plink]
 
-        row.extend([stopstalk_handle,
-                    handle,
-                    site,
-                    submission[0],
-                    submission[2],
-                    submission[1],
-                    submission[5],
-                    submission[3],
-                    submission[4],
-                    submission[6]])
-
-        encoded_row = []
-        for x in row:
-            if isinstance(x, basestring):
-                try:
-                    tmp = x.encode("utf-8", "ignore")
-                except UnicodeDecodeError:
-                    tmp = str(tmp)
-
-                # @ToDo: Dirty hack! Do something with
-                #        replace and escaping quotes
-                tmp = tmp.replace("\"", "").replace("'", "")
-                if tmp == "--":
-                    tmp = "NULL"
-                else:
-                    tmp = "\"" + tmp + "\""
-                encoded_row.append(tmp)
-            else:
-                encoded_row.append(str(x))
-
-        process_solved_counts(encoded_row[7].strip("\""),
-                              encoded_row[6].strip("\""),
-                              encoded_row[9].strip("\""),
+        submission_insert_dict = {
+            "user_id": user_id if not custom else None,
+            "custom_user_id": user_id if custom else None,
+            "problem_name": pname,
+            "problem_link": plink,
+            "stopstalk_handle": stopstalk_handle,
+            "site_handle": handle,
+            "site": site,
+            "time_stamp": submission[0],
+            "problem_id": pid,
+            "lang": submission[5],
+            "status": submission[3],
+            "points": submission[4],
+            "view_link": submission[6]
+        }
+        stable.insert(**submission_insert_dict)
+        process_solved_counts(plink,
+                              pname,
+                              submission[3],
                               user_id,
                               custom)
-
-        rows.append("(" + ", ".join(encoded_row) + ")")
-        if len(rows) > 1000:
-            insert_this_batch()
-            rows = []
 
     return submission_count
 
@@ -330,9 +326,14 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
 
     global INVALID_HANDLES
     global failed_user_retrievals
-    global plink_to_id
     global todays_date
     global metric_handlers
+
+    if concurrent_submission_retrieval_handler("GET", record.id, custom) == "ONGOING":
+        print "Already ongoing retrieval for", record.id, custom
+        return
+    else:
+        concurrent_submission_retrieval_handler("SET", record.id, custom)
 
     list_of_submissions = []
     retrieval_failures = []
@@ -350,9 +351,9 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
         nrtable.insert(**{user_column_name: record.id})
         nrtable_record = db(nrtable[user_column_name] == record.id).select().first()
 
-    disabled_sites = current.REDIS_CLIENT.smembers("disabled_retrieval")
-    for site in disabled_sites:
-        if site in all_sites:
+    for site in all_sites:
+        Site = getattr(sites, site.lower())
+        if Site.Profile.is_website_down():
             all_sites.remove(site)
 
     for site in all_sites:
@@ -388,9 +389,7 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
             # Retrieve submissions from the profile site
             site_method = P.get_submissions
             start_retrieval_time = time.time()
-            if site == "CodeForces":
-                submissions = site_method(last_retrieved, plink_to_id, is_daily_retrieval)
-            elif site == "UVa":
+            if site == "UVa":
                 submissions = site_method(last_retrieved, uva_problem_dict, is_daily_retrieval)
             else:
                 submissions = site_method(last_retrieved, is_daily_retrieval)
@@ -482,6 +481,7 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
 
     # Keep committing the updates to the db to avoid lock wait timeouts
     db.commit()
+    concurrent_submission_retrieval_handler("DEL", record.id, custom)
 
 # ----------------------------------------------------------------------------
 def new_users():
@@ -662,13 +662,8 @@ if __name__ == "__main__":
 
     populate_uva_problems()
 
-    query = ptable.link.contains("codeforces")
-    problem_records = db(query).select(ptable.id,
-                                       ptable.link,
-                                       ptable.tags)
-    for problem_record in problem_records:
-        plink_to_id[problem_record.link] = (problem_record.tags,
-                                            problem_record.id)
+    links = db(ptable).select(ptable.id, ptable.link)
+    plink_to_id = dict([(x.link, x.id) for x in links])
 
     # Get the handles which returned 404 before
     INVALID_HANDLES = db(db.invalid_handle).select()
@@ -694,7 +689,6 @@ if __name__ == "__main__":
             retrieve_submissions(record, True, current.SITES.keys(), codechef_retrieval)
 
     # Just in case the last batch has some residue
-    insert_this_batch()
     flush_problem_stats()
 
     # Insert user_ids and custom_user_ids into failed_retrieval

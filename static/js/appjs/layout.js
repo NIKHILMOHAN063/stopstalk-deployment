@@ -182,11 +182,12 @@ var initTooltips = function() {
             var stopstalkLink = this.parentElement.firstChild["href"],
                 problemLink = getParameterByName("plink", stopstalkLink),
                 thisElement = this,
-                $thisElement = $(this);
+                $thisElement = $(this),
+                problemId = $thisElement.data()["pid"];
             $.ajax({
                 url: addTodoURL,
                 method: 'POST',
-                data: {link: problemLink},
+                data: {pid: problemId},
                 success: function(response) {
                     var tooltipID = thisElement.getAttribute("data-tooltip-id");
                     $thisElement.remove();
@@ -264,7 +265,7 @@ var initTooltips = function() {
                 if (response != -1) {
                     solutionText = htmlifySubmission(response);
                 } else {
-                    solutionText = "// Unable to retrieve submission from " + site + "\n" + "/* Possible reasons :-\n\t * The submission is from an ongoing contest\n\t * There was some error from our side. \n\t   Please write to us (https://www.stopstalk.com/contact_us)\n */";
+                    solutionText = "// Unable to retrieve submission from " + site + "\n" + "/* Possible reasons :-\n\t * " + site + " is down\n\t * The submission is from an ongoing contest\n\t * There was some error from our side. \n\t   Please write to us (https://www.stopstalk.com/contact_us)\n */";
                 }
 
                 $viewPre.html(solutionText);
