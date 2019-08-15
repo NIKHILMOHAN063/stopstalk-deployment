@@ -2,19 +2,24 @@
 Stop stalking and Start StopStalking :sunglasses:
 
 ## Module Requirements
-Note: Apply sudo if required for your system.
+Note: Apply sudo if required for your system - These work on ubuntu-18.04
 
 1. First make sure the development packages of libxml2 and libxslt are installed
 
 Assuming you are running a Debian-based distribution, you can install them by using:
 
 ```
-apt-get install python-dev libxml2-dev libxslt1-dev zlib1g-dev
+apt-get update -y
+apt-get install python-dev libxml2-dev libxslt1-dev zlib1g-dev python-pip nodejs npm unzip git wget curl -y
+
+npm config set strict-ssl false
 ```
 
 Install the required packages by running:
 
 ```
+wget https://raw.githubusercontent.com/stopstalk/stopstalk-deployment/master/requirements.txt
+
 pip install -r requirements.txt
 ```
 
@@ -36,6 +41,42 @@ To install uglifycss:
 npm install uglifycss -g
 ```
 
+To download web2py:
+```
+wget https://mdipierro.pythonanywhere.com/examples/static/web2py_src.zip -O /opt/web2py_src.zip
+
+unzip /opt/web2py_src.zip -d /opt/
+```
+
+To install MySQL:
+```
+sudo debconf-set-selections <<< 'mysql-server mysql-server/root_password password PASSWORD'
+
+sudo debconf-set-selections <<< 'mysql-server mysql-server/root_password_again password PASSWORD'
+
+sudo apt-get -y install mysql-server
+
+sudo /etc/init.d/mysql start
+
+mysql -uroot -pPASSWORD -e "CREATE DATABASE stopstalkdb;"
+mysql -uroot -pPASSWORD -e "CREATE DATABASE uvajudge;"
+```
+
+To install REDIS:
+```
+sudo apt-get install build-essential tcl -y
+
+wget http://download.redis.io/redis-stable.tar.gz -O /opt/redis-stable.tar.gz
+
+cd /opt
+tar xzvf redis-stable.tar.gz
+cd /opt/redis-stable
+make
+make install
+mkdir /etc/redis
+cp /opt/redis-stable/redis.conf /etc/redis/
+```
+
 ## Installation
 1. Install web2py (We need 2.14.6 version only) in a directory. We have commited the web2py source so that you can directly unzip and start using it
 
@@ -53,7 +94,7 @@ npm install uglifycss -g
 2. Navigate into the applications directory in web2py directory.
 
     ```
-    $ cd web2py/applications/
+    $ cd /opt/web2py/applications/
     ```
 3. Install StopStalk by cloning this repository
 
@@ -76,8 +117,8 @@ npm install uglifycss -g
 6. Copy `0firstrun.py` to `models/`
 
     ```
-    $ cd stopstalk/
-    $ cp models/0firstrun.py.sample models/0firstrun.py
+    cd stopstalk/
+    cp models/0firstrun.py.sample models/0firstrun.py
     ```
 7. Open `0firstrun.py` and change the settings.
 
@@ -114,8 +155,13 @@ npm install uglifycss -g
 9. Navigate back to the web2py folder and start the web2py server.
 
     ```
-    $ cd web2py
-    $ python web2py.py -a yourPassword // Choose any password
+    cd /opt/web2py
+
+    add-apt-repository ppa:fkrull/deadsnakes-python2.7 && apt-get update && apt-get upgrade -y
+
+    iptables -A INPUT -p tcp --dport 8000 -j ACCEPT
+    
+    python web2py.py -a PASSWORD // Choose any password
     ```
 
 10. Open the browser and go to the URL -
