@@ -138,6 +138,38 @@ def add_suggested_tags():
 
 # ----------------------------------------------------------------------------
 @auth.requires_login()
+def problem_difficulty():
+    if request.env.request_method != "POST" or request.extension != "json":
+        raise(HTTP(405, "Method not allowed"))
+        return dict()
+
+    problem_id = int(request.vars["problem_id"])
+    score = int(request.vars["score"])
+    pdtable = db.problem_difficulty
+    ptable = db.problem
+
+    query = (pdtable.user_id == session.user_id) & \
+            (pdtable.problem_id == problem_id)
+    pdrecord = db(query).select().first()
+    if pdrecord is None:
+        pdtable.insert(problem_id=problem_id,
+                       score=score,
+                       user_id=session.user_id)
+    else:
+        pdrecord.update_record(score=score)
+
+    problem_details = utilities.get_next_problem_to_suggest(session.user_id)
+
+    return problem_details
+
+# ----------------------------------------------------------------------------
+@auth.requires_login()
+def get_next_problem_to_suggest():
+    return utilities.get_next_problem_to_suggest(session.user_id,
+                                                 request.vars.get("problem_id", None))
+
+# ----------------------------------------------------------------------------
+@auth.requires_login()
 def get_suggested_tags():
 
     empty_response = dict(user_tags=[], tag_counts=[])
@@ -195,6 +227,14 @@ def index():
         # Disables direct entering of a URL
         session.flash = T("Please click on a Problem Link")
         redirect(URL("default", "index"))
+        return
+
+    try:
+        problem_id = int(request.vars["problem_id"])
+    except ValueError:
+        session.flash = T("Invalid problem!")
+        redirect(URL("default", "index"))
+        return
 
     submission_type = "friends"
     if request.vars.has_key("submission_type"):
@@ -210,7 +250,6 @@ def index():
     stable = db.submission
     ptable = db.problem
 
-    problem_id = int(request.vars["problem_id"])
     problem_record = ptable(problem_id)
     if problem_record is None:
         session.flash = T("Please click on a Problem Link")
@@ -254,8 +293,7 @@ def index():
     details_table = TABLE(_style="font-size: 140%; float: left; width: 50%;")
     problem_class = ""
 
-    link_class = utilities.get_link_class(problem_id, session.user_id)
-    link_title = (" ".join(link_class.split("-"))).capitalize()
+    link_class, link_title = utilities.get_link_class(problem_id, session.user_id)
 
     tbody = TBODY()
     tbody.append(TR(TD(),
@@ -283,9 +321,15 @@ def index():
                       _class="problem-page-editorials",
                       _style="color: white;",
                       _target="_blank"),
-                    _class="chip deep-purple darken-1 pulse",
+                    _class="chip deep-purple darken-1",
                     _id="problem-page-editorial-button"))
 
+    if auth.is_logged_in():
+        links.append(DIV(A(I(_class="fa fa-edit"), " " + T("Suggest Difficulty"),
+                             _style="color: white;"),
+                         _class="chip",
+                         _style="background-color: #9b4da9; cursor: pointer;",
+                         _id="problem-page-difficulty-button"))
     tbody.append(TR(TD(),
                     TD(STRONG(T("Links") + ":")),
                     links))
@@ -759,8 +803,7 @@ def search():
     for problem in all_problems:
         tr = TR()
 
-        link_class = utilities.get_link_class(problem["id"], session.user_id)
-        link_title = (" ".join(link_class.split("-"))).capitalize()
+        link_class, link_title = utilities.get_link_class(problem["id"], session.user_id)
 
         tr.append(TD(utilities.problem_widget(problem["name"],
                                               problem["link"],
