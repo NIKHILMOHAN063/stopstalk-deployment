@@ -74,7 +74,7 @@ current.pushover_user_token = ""
 current.spoj_lambda_url = ""
 
 # Codechef API credentials
-current.codechef_client_id = ""
-current.codechef_client_secret = ""
+current.codechef_client_id = "xxxx"
+current.codechef_client_secret = "xxxx"
 
 # =============================================================================

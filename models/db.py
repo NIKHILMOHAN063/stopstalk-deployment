@@ -39,6 +39,7 @@ if not request.env.web2py_runtime_gae:
                        ':' + current.mysql_password + \
                        '@' + current.mysql_server
 
+    print "{0} {1} {2} {3}".format(current.mysql_user, current.mysql_server, current.mysql_password, mysql_connection)
     db = DAL(mysql_connection + '/' + current.mysql_dbname,
              table_hash="stopstalkdb")
     uvadb = DAL(mysql_connection + '/' + current.mysql_uvadbname,
@@ -174,6 +175,7 @@ extra_fields = [Field("institute",
 site_handles = []
 all_last_retrieved = []
 for site in current.SITES:
+    print "CURRENT SITE: {0}".format(site)
     site_handles.append(Field(site.lower() + "_handle",
                               label=site + " handle"))
     all_last_retrieved.append(Field(site.lower() + "_lr", "datetime",
@@ -556,8 +558,8 @@ custom_friend_fields = [Field("user_id", "reference auth_user"),
                               default=initial_date,
                               writable=False)]
 
-custom_friend_fields += site_handles
-custom_friend_fields += all_last_retrieved
+# custom_friend_fields += site_handles
+# custom_friend_fields += all_last_retrieved
 db.define_table("custom_friend",
                 format="%(first_name)s %(last_name)s (%(id)s)",
                 *custom_friend_fields)
