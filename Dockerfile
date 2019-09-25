@@ -1,16 +1,24 @@
-FROM ubuntu:16.04
+FROM python:2-alpine
 
+
+RUN apk add  --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.7/main/ nodejs=8.9.3-r1
+
+
+
+RUN apk add --no-cache git
+
+
+RUN apk add --update \
+    python \
+    python-dev \
+    py-pip \
+    build-base
 
 WORKDIR /usr/src/stalk
 COPY requirements.txt ./
-
-RUN apt-get update -y 
-RUN apt-get install -y python-dev libxml2-dev libxslt1-dev zlib1g-dev python-pip
-
 RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+# RUN pip install -r requirements.txt
 
-RUN apt-get install -y curl wget unzip git nodejs npm
 RUN npm install uglify-js -g
 RUN npm install uglifycss -g
 
@@ -27,11 +35,11 @@ WORKDIR /usr/src/stalk/web2py
 EXPOSE 8000
 
 # TEST APP
-WORKDIR /usr/src/test-app
-COPY test-app ./
-RUN npm install
-EXPOSE 3000
+# WORKDIR /usr/src/test-app
+# COPY test-app ./
+# RUN npm install
+# EXPOSE 3000
 
-CMD ["/usr/bin/node", "server.js"]
+#CMD ["/usr/bin/node", "server.js"]
 
-# CMD ["/usr/bin/python web2py.py -a sandy"]
+CMD ["/usr/local/bin/python", "web2py.py", "-i 0.0.0.0", "-a sandy"]
