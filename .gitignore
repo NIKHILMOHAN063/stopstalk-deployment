@@ -1,4 +1,5 @@
 /cache/*
+test-app/node_modules/*
 mysql-server/data/*
 /errors/*
 /models/0firstrun.py

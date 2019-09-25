@@ -23,5 +23,16 @@ services:
     networks:
       - beingzero
 
+  app:
+    build: ./
+    networks:
+      - beingzero
+    ports:
+    - '3000:3000'
+    - '8000:8000'
+    links:
+      - redis
+      - mysql
+
 networks:
   beingzero:
