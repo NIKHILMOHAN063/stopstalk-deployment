@@ -1,4 +1,5 @@
 /cache/*
+mysql-server/data/*
 /errors/*
 /models/0firstrun.py
 /sessions/*
