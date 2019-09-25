@@ -5,7 +5,7 @@ RUN apk add  --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.7/m
 
 
 
-RUN apk add --no-cache git mysql-client
+RUN apk add --no-cache git mysql-client openssl openssh
 
 
 RUN apk add --update \
@@ -25,24 +25,38 @@ RUN npm install uglifycss -g
 RUN wget http://www.web2py.com/examples/static/web2py_src.zip
 RUN unzip web2py_src.zip
 
-WORKDIR /usr/src/stalk/web2py/applications
 
-RUN git clone https://github.com/stopstalk/stopstalk-deployment.git stopstalk
+WORKDIR /usr/src/stalk/web2py/applications
+COPY . ./stopstalk/
+# RUN git clone https://github.com/stopstalk/stopstalk-deployment.git stopstalk
 WORKDIR /usr/src/stalk/web2py/applications/stopstalk
 RUN cp models/0firstrun.py.sample models/0firstrun.py
-WORKDIR /usr/src/stalk/web2py
- 
-EXPOSE 8000
+
 
 # TEST APP
-# WORKDIR /usr/src/test-app
-# COPY test-app ./
-# RUN npm install
-# EXPOSE 3000
+WORKDIR /usr/src/test-app
+COPY test-app ./
+RUN npm install
+EXPOSE 3000
 
-#CMD ["/usr/bin/node", "server.js"]
+# RUN /usr/bin/mysql -uroot -proot -h mysql -e "CREATE DATABASE stopstalkdb;"
+# RUN /usr/bin/mysql -uroot -proot -h mysql -e "CREATE DATABASE uvajudge;"
 
-RUN /usr/bin/mysql -uroot -pPASSWORD -h mysql -e "CREATE DATABASE stopstalkdb;"
-RUN /usr/bin/mysql -uroot -pPASSWORD -h mysql -e "CREATE DATABASE uvajudge;"
 
-CMD ["/usr/local/bin/python", "web2py.py", "-i 0.0.0.0", "-a sandy"]
+WORKDIR /usr/src/stalk/web2py
+EXPOSE 8000
+
+# http://www.web2py.com/AlterEgo/default/show/140
+RUN openssl genrsa -out stalk.key 2048
+RUN openssl req -new -key stalk.key -out stalk.csr -subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=localhost"
+RUN openssl x509 -req -days 365 -in stalk.csr -signkey stalk.key -out stalk.crt
+RUN chmod -R 777 stalk.*
+
+WORKDIR /usr/src/stalk/web2py
+#CMD ["/usr/local/bin/python", "web2py.py", "-i 0.0.0.0", "-a beingzero"]
+#CMD ["/usr/local/bin/python", "web2py.py", "-c stalk.crt", "-k stalk.key", "-i 0.0.0.0", "-a beingzero"]
+# /usr/local/bin/python web2py.py -c stalk.crt -k stalk.key -i 0.0.0.0 -a beingzero
+
+
+WORKDIR /usr/src/test-app
+CMD ["/usr/bin/node", "server.js"]
