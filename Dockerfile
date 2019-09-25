@@ -5,7 +5,7 @@ RUN apk add  --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.7/m
 
 
 
-RUN apk add --no-cache git
+RUN apk add --no-cache git mysql-client
 
 
 RUN apk add --update \
@@ -41,5 +41,8 @@ EXPOSE 8000
 # EXPOSE 3000
 
 #CMD ["/usr/bin/node", "server.js"]
+
+RUN /usr/bin/mysql -uroot -pPASSWORD -h mysql -e "CREATE DATABASE stopstalkdb;"
+RUN /usr/bin/mysql -uroot -pPASSWORD -h mysql -e "CREATE DATABASE uvajudge;"
 
 CMD ["/usr/local/bin/python", "web2py.py", "-i 0.0.0.0", "-a sandy"]
