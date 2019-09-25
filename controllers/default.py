@@ -916,7 +916,7 @@ def leaderboard():
        specific_country == False:
         current.REDIS_CLIENT.set("global_leaderboard_cache",
                                  json.dumps(users),
-                                 ex=5 * 60 * 60)
+                                 ex=1 * 60 * 60)
 
     return dict(users=users, logged_in_row=logged_in_row)
 
@@ -947,7 +947,11 @@ def filters():
         page = 1
     else:
         page = int(request.args[0])
-        page -= 1
+
+    if page > 10 and not auth.is_logged_in():
+        session.flash = "Log in to see more submissions"
+        redirect(URL("default", "index"))
+        return
 
     if current.REDIS_CLIENT.get("languages_updated_on") is None or \
        (datetime.datetime.now() - \
@@ -1155,14 +1159,17 @@ def filters():
 
     PER_PAGE = current.PER_PAGE
     # Apply the complex query and sort by time_stamp DESC
-    filtered = db(query).select(limitby=(page * PER_PAGE,
-                                         (page + 1) * PER_PAGE),
+    filtered = db(query).select(limitby=((page - 1) * PER_PAGE,
+                                         page * PER_PAGE),
                                 orderby=~stable.time_stamp)
 
     total_problems = db(query).count()
     total_pages = total_problems / 100
     if total_problems % 100 == 0:
         total_pages += 1
+
+    if total_pages > 10 and not auth.is_logged_in():
+        total_pages = 10
 
     table = utilities.render_table(filtered, duplicates, session.user_id)
     switch = DIV(LABEL(H6(T("Friends' Submissions"),
