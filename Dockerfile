@@ -5,7 +5,7 @@ RUN apk add  --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.7/m
 
 
 
-RUN apk add --no-cache git mysql-client openssl openssh
+RUN apk add --no-cache git mysql-client openssl openssh redis
 
 
 RUN apk add --update \
