@@ -26,14 +26,14 @@ RUN npm install uglify-js -g
 RUN npm install uglifycss -g
 
 
-COPY web2py_src.zip .
-RUN unzip web2py_src.zip
-RUN mv justweb2py web2py
+#COPY web2py_src.zip .
+#RUN unzip web2py_src.zip
+#RUN mv justweb2py web2py
 # RUN wget https://github.com/web2py/web2py/archive/R-2.17.1.zip
 # RUN unzip R-2.17.1.zip
 # RUN mv web2py-R-2.17.1 web2py
-# RUN wget http://www.web2py.com/examples/static/web2py_src.zip
-# RUN unzip web2py_src.zip
+RUN wget https://mdipierro.pythonanywhere.com/examples/static/web2py_src.zip
+RUN unzip web2py_src.zip
 
 
 WORKDIR /usr/src/stalk/web2py/applications
