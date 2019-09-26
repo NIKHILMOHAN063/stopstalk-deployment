@@ -12,12 +12,15 @@ RUN apk add --update \
     python \
     python-dev \
     py-pip \
-    build-base
+    build-base \
+    libxml2-dev \
+    libxslt-dev \
+    linux-headers
 
 WORKDIR /usr/src/stalk
 COPY requirements.txt ./
 RUN pip install --upgrade pip
-# RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt
 
 RUN npm install uglify-js -g
 RUN npm install uglifycss -g

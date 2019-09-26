@@ -33,28 +33,32 @@ import json as json_for_views
 ## once in production, remove reload=True to gain full speed
 myconf = AppConfig(reload=True)
 
-if not request.env.web2py_runtime_gae:
-    ## if NOT running on Google App Engine use SQLite or other DB
-    mysql_connection = 'mysql://' + current.mysql_user + \
-                       ':' + current.mysql_password + \
-                       '@' + current.mysql_server
+try:
+    if not request.env.web2py_runtime_gae:
+        ## if NOT running on Google App Engine use SQLite or other DB
+        mysql_connection = 'mysql://' + current.mysql_user + \
+                        ':' + current.mysql_password + \
+                        '@' + current.mysql_server
 
-    print "{0} {1} {2} {3}".format(current.mysql_user, current.mysql_server, current.mysql_password, mysql_connection)
-    db = DAL(mysql_connection + '/' + current.mysql_dbname,
-             table_hash="stopstalkdb")
-    uvadb = DAL(mysql_connection + '/' + current.mysql_uvadbname,
-                table_hash="uvajudge")
+        print "{0} {1} {2} {3}".format(current.mysql_user, current.mysql_server, current.mysql_password, mysql_connection)
+        db = DAL(mysql_connection + '/' + current.mysql_dbname,
+                table_hash="stopstalkdb")
+        uvadb = DAL(mysql_connection + '/' + current.mysql_uvadbname,
+                    table_hash="uvajudge")
 
-#    db = DAL(myconf.take('db.uri'), pool_size=myconf.take('db.pool_size', cast=int), check_reserved=['all'])
-else:
-    ## connect to Google BigTable (optional 'google:datastore://namespace')
-    db = DAL('google:datastore+ndb')
-    ## store sessions and tickets there
-    session.connect(request, response, db=db)
-    ## or store session in Memcache, Redis, etc.
-    ## from gluon.contrib.memdb import MEMDB
-    ## from google.appengine.api.memcache import Client
-    ## session.connect(request, response, db = MEMDB(Client()))
+    #    db = DAL(myconf.take('db.uri'), pool_size=myconf.take('db.pool_size', cast=int), check_reserved=['all'])
+    else:
+        ## connect to Google BigTable (optional 'google:datastore://namespace')
+        db = DAL('google:datastore+ndb')
+        ## store sessions and tickets there
+        session.connect(request, response, db=db)
+        ## or store session in Memcache, Redis, etc.
+        ## from gluon.contrib.memdb import MEMDB
+        ## from google.appengine.api.memcache import Client
+        ## session.connect(request, response, db = MEMDB(Client()))
+except Exception as err:
+    print(err)
+
 
 ## by default give a view/generic.extension to all actions from localhost
 ## none otherwise. a pattern can be 'controller/function.extension'
