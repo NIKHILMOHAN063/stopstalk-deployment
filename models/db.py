@@ -36,12 +36,12 @@ myconf = AppConfig(reload=True)
 if not request.env.web2py_runtime_gae:
     ## if NOT running on Google App Engine use SQLite or other DB
     mysql_connection = 'mysql://' + current.mysql_user + \
-                    ':' + current.mysql_password + \
-                    '@' + current.mysql_server
+                       ':' + current.mysql_password + \
+                       '@' + current.mysql_server
 
     print "{0} {1} {2} {3}".format(current.mysql_user, current.mysql_server, current.mysql_password, mysql_connection)
     db = DAL(mysql_connection + '/' + current.mysql_dbname,
-            table_hash="stopstalkdb")
+             table_hash="stopstalkdb")
     uvadb = DAL(mysql_connection + '/' + current.mysql_uvadbname,
                 table_hash="uvajudge")
 
@@ -100,8 +100,7 @@ T.is_writable = False
 
 initial_date = datetime.strptime(current.INITIAL_DATE, "%Y-%m-%d %H:%M:%S")
 
-db.define_table("institutes",
-                Field("name", label=T("Name")))
+db.define_table("institutes", Field("name", label=T("Name")))
 
 itable = db.institutes
 all_institutes = db(itable).select(itable.name,
@@ -559,8 +558,9 @@ custom_friend_fields = [Field("user_id", "reference auth_user"),
                               default=initial_date,
                               writable=False)]
 
-# custom_friend_fields += site_handles
-# custom_friend_fields += all_last_retrieved
+#custom_friend_fields += site_handles
+#custom_friend_fields += all_last_retrieved
+
 db.define_table("custom_friend",
                 format="%(first_name)s %(last_name)s (%(id)s)",
                 *custom_friend_fields)

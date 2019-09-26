@@ -78,11 +78,11 @@ class Logger:
             @param site (String): Site name of the current logline
             @param message (String): Actual message to be logged
         """
-        print "%s %s%s %s %s" % (str(datetime.datetime.now()),
+        print ("%s %s%s %s %s" % (str(datetime.datetime.now()),
                                   self.stopstalk_handle,
                                   self.custom_str,
                                   site,
-                                  message)
+                                  message))
 
     # --------------------------------------------------------------------------
     def generic_log(self, message):
@@ -91,10 +91,10 @@ class Logger:
 
             @param message (String): Actual message to be logged
         """
-        print "%s %s%s %s" % (str(datetime.datetime.now()),
+        print ("%s %s%s %s" % (str(datetime.datetime.now()),
                                self.stopstalk_handle,
                                self.custom_str,
-                               message)
+                               message))
 
 # ------------------------------------------------------------------------------
 def concurrent_submission_retrieval_handler(action, user_id, custom):
@@ -419,7 +419,7 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
     global metric_handlers
 
     if concurrent_submission_retrieval_handler("GET", record.id, custom) == "ONGOING":
-        print "Already ongoing retrieval for", record.id, custom
+        print ("Already ongoing retrieval for", record.id, custom)
         return
     else:
         concurrent_submission_retrieval_handler("SET", record.id, custom)
@@ -438,7 +438,7 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
     logger = Logger(record.stopstalk_handle, custom)
 
     if nrtable_record is None:
-        print "Record not found", user_column_name, record.id
+        print ("Record not found", user_column_name, record.id)
         nrtable.insert(**{user_column_name: record.id})
         nrtable_record = db(nrtable[user_column_name] == record.id).select().first()
 
@@ -601,6 +601,10 @@ def new_users():
         for site in current.SITES:
             if site in disabled_sites:
                 continue
+            if not (table.has_key(site.lower() + "_lr")):
+                continue
+            if not (table.has_key(site.lower() + "_handle")):
+                continue
             query |= ((table[site.lower() + "_lr"] == current.INITIAL_DATE) & \
                       (table[site.lower() + "_handle"] != ""))
         return query
@@ -619,8 +623,9 @@ def new_users():
                 users[user.id].append(site)
 
     query = _get_initial_query(cftable)
-    custom_users = db(query).select(limitby=(0, max_limit),
-                                    orderby="<random>")
+    custom_users = []
+    if query:
+        custom_users = db(query).select(limitby=(0, max_limit), orderby="<random>")
     cusers = {}
     for user in custom_users:
         cusers[user.id] = []
@@ -759,7 +764,7 @@ if __name__ == "__main__":
     elif retrieval_type == "codechef_new_retrievals":
         users, custom_users = codechef_new_retrievals()
     else:
-        print "Invalid arguments"
+        print ("Invalid arguments")
         sys.exit()
 
     populate_uva_problems()
