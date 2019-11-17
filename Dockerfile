@@ -65,8 +65,8 @@ RUN chmod -R 777 stalk.*
 WORKDIR /usr/src/stalk/web2py
 #CMD ["/usr/local/bin/python", "web2py.py", "-i 0.0.0.0", "-a beingzero"]
 #CMD ["/usr/local/bin/python", "web2py.py", "-c stalk.crt", "-k stalk.key", "-i 0.0.0.0", "-a beingzero"]
-# /usr/local/bin/python web2py.py -c stalk.crt -k stalk.key -i 0.0.0.0 -a beingzero
+CMD /usr/local/bin/python web2py.py -c stalk.crt -k stalk.key -i 0.0.0.0 -a beingzero
 
 
-WORKDIR /usr/src/test-app
-CMD ["/usr/bin/node", "server.js"]
+# WORKDIR /usr/src/test-app
+# CMD ["/usr/bin/node", "server.js"]

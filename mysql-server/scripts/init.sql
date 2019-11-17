@@ -1,0 +1,3 @@
+CREATE DATABASE IF NOT EXISTS stopstalkdb;
+CREATE DATABASE IF NOT EXISTS uvajudge;
+USE stopstalkdb;

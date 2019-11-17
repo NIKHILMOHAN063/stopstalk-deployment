@@ -11,20 +11,29 @@ services:
       - '6379:6379'
 
   mysql:
-    image: mysql:latest
-    command: --default-authentication-plugin=mysql_native_password
+    image: mysql:5.7
+    command: --init-file /data/application/init.sql
     restart: always
     environment:
-      MYSQL_DATABASE: stopstalkdb
       MYSQL_ROOT_PASSWORD: root
     ports:
-    - '3306:3306'
+      - '3306:3306'
     volumes:
       - ./mysql-server/data:/var/lib/mysql
+      - ./mysql-server/scripts/init.sql:/data/application/init.sql
     networks:
       - beingzero
     security_opt:
       - seccomp:unconfined
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080
+    networks:
+      - beingzero
+
 
   app:
     build: ./
