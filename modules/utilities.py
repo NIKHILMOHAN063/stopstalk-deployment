@@ -882,7 +882,7 @@ def get_profile_url(site, handle):
         @return (String): URL of the user profile on the site
     """
 
-    if handle == "":
+    if handle == "" or handle is None:
         return "NA"
 
     url_mappings = {"CodeChef": "users/",
