@@ -1,5 +1,5 @@
 """
-    Copyright (c) 2015-2019 Raj Patel(raj454raj@gmail.com), StopStalk
+    Copyright (c) 2015-2020 Raj Patel(raj454raj@gmail.com), StopStalk
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,10 @@
 2. All the users (including custom users)
     python web2py.py -S stopstalk -M -R applications/stopstalk/private/scripts/stopstalk_rating_history.py -A complete
 """
+
+# ==============================================================================
+# DEPRECATED
+# ==============================================================================
 
 import sys
 import datetime

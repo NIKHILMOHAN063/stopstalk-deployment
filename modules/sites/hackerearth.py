@@ -1,5 +1,5 @@
 """
-    Copyright (c) 2015-2019 Raj Patel(raj454raj@gmail.com), StopStalk
+    Copyright (c) 2015-2020 Raj Patel(raj454raj@gmail.com), StopStalk
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -187,7 +187,7 @@ class Profile(object):
                                                time_stamp.tm_hour,
                                                time_stamp.tm_min,
                                                time_stamp.tm_sec) + \
-                                               datetime.timedelta(minutes=630)
+                                               datetime.timedelta(minutes=690)
                 curr = time.strptime(str(time_stamp), "%Y-%m-%d %H:%M:%S")
 
                 if curr <= last_retrieved:

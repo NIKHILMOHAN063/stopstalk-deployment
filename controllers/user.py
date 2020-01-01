@@ -1,5 +1,5 @@
 """
-    Copyright (c) 2015-2019 Raj Patel(raj454raj@gmail.com), StopStalk
+    Copyright (c) 2015-2020 Raj Patel(raj454raj@gmail.com), StopStalk
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -669,7 +669,6 @@ def get_stopstalk_user_stats():
 
     query = (stable["custom_user_id" if custom else "user_id"] == user_id)
     rows = db(query).select(stable.time_stamp,
-                            stable.problem_link,
                             stable.problem_id,
                             stable.status,
                             stable.site,
@@ -682,7 +681,7 @@ def get_stopstalk_user_stats():
         current.REDIS_CLIENT.set(redis_cache_key,
                                  json.dumps(result, separators=(",", ":")),
                                  ex=1 * 60 * 60)
-    else:
+    elif "rating_history" in result:
         del result["rating_history"]
 
     return result
@@ -908,7 +907,7 @@ def submissions():
     else:
         page = "1"
 
-    if int(page) > 10 and not auth.is_logged_in():
+    if int(page) > current.USER_PAGINATION_LIMIT and not auth.is_logged_in():
         session.flash = T("Please enter a valid page")
         redirect(URL("default", "index"))
         return

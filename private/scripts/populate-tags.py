@@ -1,7 +1,7 @@
 # encoding=utf8
 
 """
-    Copyright (c) 2015-2019 Raj Patel(raj454raj@gmail.com), StopStalk
+    Copyright (c) 2015-2020 Raj Patel(raj454raj@gmail.com), StopStalk
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -131,4 +131,8 @@ db.commit()
 print "\n\n\n=========================== Untagged ===========================\n"
 
 for a, b in sorted(untagged.items(), key=lambda (k, v): (v, k), reverse=True):
-    print unicode(a), unicode(b)
+    try:
+        print unicode(a), unicode(b)
+    except UnicodeEncodeError:
+        print "Can't print this tag"
+        pass
