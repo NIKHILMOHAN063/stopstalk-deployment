@@ -12,7 +12,7 @@ services:
 
   mysql:
     image: mysql:5.7
-    command: --init-file /data/application/init.sql
+    command: --init-file /application/mysql-server/scripts/init.sql
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: root
@@ -20,7 +20,7 @@ services:
       - '3306:3306'
     volumes:
       - ./mysql-server/data:/var/lib/mysql
-      - ./mysql-server/scripts/init.sql:/data/application/init.sql
+      - ./mysql-server/scripts:/application/mysql-server/scripts
     networks:
       - beingzero
     security_opt:
@@ -42,6 +42,8 @@ services:
     ports:
     - '3000:3000'
     - '8000:8000'
+    volumes:
+      - ./mysql-server/scripts:/application/mysql-server/scripts
     depends_on:
       - "redis"
       - "mysql"
