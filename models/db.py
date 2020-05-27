@@ -39,7 +39,6 @@ if not request.env.web2py_runtime_gae:
                        ':' + current.mysql_password + \
                        '@' + current.mysql_server
 
-    print "{0} {1} {2} {3}".format(current.mysql_user, current.mysql_server, current.mysql_password, mysql_connection)
     db = DAL(mysql_connection + '/' + current.mysql_dbname,
              table_hash="stopstalkdb")
     uvadb = DAL(mysql_connection + '/' + current.mysql_uvadbname,
@@ -55,7 +54,6 @@ else:
     ## from gluon.contrib.memdb import MEMDB
     ## from google.appengine.api.memcache import Client
     ## session.connect(request, response, db = MEMDB(Client()))
-
 
 ## by default give a view/generic.extension to all actions from localhost
 ## none otherwise. a pattern can be 'controller/function.extension'
@@ -101,12 +99,12 @@ T.is_writable = False
 
 initial_date = datetime.datetime.strptime(current.INITIAL_DATE, "%Y-%m-%d %H:%M:%S")
 
-db.define_table("institutes", Field("name"))
-#db.define_table("institutes", Field("name", label=T("Name")))
+db.define_table("institutes",
+                Field("name", label=T("Name")))
 
 itable = db.institutes
-# all_institutes = db(itable).select(itable.name, orderby=itable.name)
-all_institutes = []
+all_institutes = db(itable).select(itable.name,
+                                   orderby=itable.name)
 all_institutes = [x["name"].strip("\"") for x in all_institutes]
 all_institutes.append("Other")
 extra_fields = [Field("institute",
@@ -177,7 +175,6 @@ extra_fields = [Field("institute",
 site_handles = []
 all_last_retrieved = []
 for site in current.SITES:
-    print "CURRENT SITE: {0}".format(site)
     site_handles.append(Field(site.lower() + "_handle",
                               label=site + " handle"))
     all_last_retrieved.append(Field(site.lower() + "_lr", "datetime",
@@ -571,12 +568,11 @@ custom_friend_fields = [Field("user_id", "reference auth_user"),
                               default=initial_date,
                               writable=False)]
 
-#custom_friend_fields += site_handles
-#custom_friend_fields += all_last_retrieved
-
+custom_friend_fields += site_handles
+custom_friend_fields += all_last_retrieved
 db.define_table("custom_friend",
                 format="%(first_name)s %(last_name)s (%(id)s)",
-                *custom_friend_fields)
+                *[field.clone() for field in custom_friend_fields])
 
 def _count_users_lambda(row):
     if row.problem.user_ids in (None, ""):
