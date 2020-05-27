@@ -41,7 +41,7 @@ if not request.env.web2py_runtime_gae:
 
     print "{0} {1} {2} {3}".format(current.mysql_user, current.mysql_server, current.mysql_password, mysql_connection)
     db = DAL(mysql_connection + '/' + current.mysql_dbname,
-             table_hash="stopstalkdb", fake_migrate_all=True)
+             table_hash="stopstalkdb")
     uvadb = DAL(mysql_connection + '/' + current.mysql_uvadbname,
                 table_hash="uvajudge", fake_migrate_all=True)
 
@@ -101,11 +101,12 @@ T.is_writable = False
 
 initial_date = datetime.datetime.strptime(current.INITIAL_DATE, "%Y-%m-%d %H:%M:%S")
 
-db.define_table("institutes", Field("name", label=T("Name")))
+db.define_table("institutes", Field("name"))
+#db.define_table("institutes", Field("name", label=T("Name")))
 
 itable = db.institutes
-all_institutes = db(itable).select(itable.name,
-                                   orderby=itable.name)
+# all_institutes = db(itable).select(itable.name, orderby=itable.name)
+all_institutes = []
 all_institutes = [x["name"].strip("\"") for x in all_institutes]
 all_institutes.append("Other")
 extra_fields = [Field("institute",
