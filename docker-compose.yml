@@ -42,8 +42,14 @@ services:
     ports:
     - '3000:3000'
     - '8000:8000'
+    command: >
+      sh -c "pip install --upgrade pip &&
+             pip install -r requirements.txt && 
+             python web2py.py -c stalk.crt -k stalk.key -i 0.0.0.0 -a beingzero"
     volumes:
       - ./mysql-server/scripts:/application/mysql-server/scripts
+      - ./:/usr/src/stalk/web2py/applications/stopstalk
+      - ./requirements.txt:/usr/src/stalk/web2py/requirements.txt
     depends_on:
       - "redis"
       - "mysql"

@@ -1,56 +1,11 @@
-FROM python:2-alpine
+FROM sandywadhwa/stalk-base-img-base:latest
 
+# WORKDIR /usr/src/stalk/web2py/applications
+# COPY . ./stopstalk/
 
-RUN apk add  --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.7/main/ nodejs=8.9.3-r1
-
-
-
-RUN apk add --no-cache git mysql-client openssl openssh redis
-
-
-RUN apk add --update \
-    python \
-    python-dev \
-    py-pip \
-    build-base \
-    libxml2-dev \
-    libxslt-dev \
-    linux-headers
-
-WORKDIR /usr/src/stalk
-COPY requirements.txt ./
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
-
-RUN npm install uglify-js -g
-RUN npm install uglifycss -g
-
-
-#COPY web2py_src.zip .
-#RUN unzip web2py_src.zip
-#RUN mv justweb2py web2py
-# RUN wget https://github.com/web2py/web2py/archive/R-2.17.1.zip
-# RUN unzip R-2.17.1.zip
-# RUN mv web2py-R-2.17.1 web2py
-RUN wget https://mdipierro.pythonanywhere.com/examples/static/web2py_src.zip
-RUN unzip web2py_src.zip
-
-
-WORKDIR /usr/src/stalk/web2py/applications
-COPY . ./stopstalk/
 # RUN git clone https://github.com/stopstalk/stopstalk-deployment.git stopstalk
 WORKDIR /usr/src/stalk/web2py/applications/stopstalk
-RUN cp models/0firstrun.py.sample models/0firstrun.py
-
-
-# TEST APP
-WORKDIR /usr/src/test-app
-COPY test-app ./
-RUN npm install
-EXPOSE 3000
-
-# RUN /usr/bin/mysql -uroot -proot -h mysql -e "CREATE DATABASE stopstalkdb;"
-# RUN /usr/bin/mysql -uroot -proot -h mysql -e "CREATE DATABASE uvajudge;"
+# RUN cp models/0firstrun.py.sample models/0firstrun.py
 
 
 WORKDIR /usr/src/stalk/web2py
@@ -65,7 +20,9 @@ RUN chmod -R 777 stalk.*
 WORKDIR /usr/src/stalk/web2py
 #CMD ["/usr/local/bin/python", "web2py.py", "-i 0.0.0.0", "-a beingzero"]
 #CMD ["/usr/local/bin/python", "web2py.py", "-c stalk.crt", "-k stalk.key", "-i 0.0.0.0", "-a beingzero"]
-CMD /usr/local/bin/python web2py.py -c stalk.crt -k stalk.key -i 0.0.0.0 -a beingzero
+
+
+# CMD /usr/local/bin/python web2py.py -c stalk.crt -k stalk.key -i 0.0.0.0 -a beingzero
 
 
 # WORKDIR /usr/src/test-app
