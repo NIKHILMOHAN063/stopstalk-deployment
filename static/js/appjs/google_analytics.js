@@ -10,6 +10,17 @@
         });
     };
 
+    var problemAuthorsClickHandler = function() {
+        $(document).on('click', '#problems-authored-count', function() {
+            var problemCount = parseInt($(this).html().split(" ")[0]);
+            if (problemCount > 0) {
+                sendToGA('button', 'Profile page - Non-zero problems authored link', 'click');
+            } else {
+                sendToGA('button', 'Profile page - No problems authored link', 'click');
+            }
+        })
+    };
+
     var addEventListener = function(selector, label, buttonLabel, eventType) {
         if (!eventType) eventType = 'click';
         $(document).on(eventType, selector, function() {
@@ -66,6 +77,9 @@
         addEventListener('#update-my-submissions', 'Refresh my submissions', false);
         addEventListener('#disabled-update-my-submissions', 'Disabled refresh my submissions', false);
         addEventListener('.read-editorial-user-profile-page', 'Read editorial - user profile page', false);
+        addEventListener('#login-to-view-stopstalk-rating-graph', 'Profile page - login to view StopStalk rating history', false);
+
+        problemAuthorsClickHandler();
     };
 
     var addMiscellaneousToGA = function() {
@@ -79,9 +93,10 @@
         addEventListener('#problem-difficulty-title a', 'Problem page from Problem difficulty modal', false);
         addEventListener('#onboarding-button', 'Onboarding Button', false);
         addEventListener('#footer-media-kit', 'Footer Media Kit', false);
+        addEventListener('#footer-privacy-policy', 'Footer Privacy Policy', false);
         addEventListener('#footer-faqs', 'Footer FAQs', false);
         addEventListener('#footer-contact-us', 'Footer Contact Us', false);
-        addEventListener('#footer-license', 'Footer MIT License', false);
+        addEventListener('#footer-stopstalk-status', 'Footer StopStalk status', false);
         addEventListener('#footer-contributors', 'Footer Contributors', false);
         addEventListener('#footer-raj454raj', 'Footer raj454raj', false);
         addEventListener('#first-friend-search', 'First friend search', false);
@@ -95,6 +110,10 @@
         addEventListener('#job-profile-cta', 'StopStalk Job profile CTA', false);
 
         addEventListener('#recent-announcements-update-job-profile-now', 'Onboarding StopStalk Job Profile', false);
+
+        addEventListener('#problem-difficulty-later', 'Problem Difficulty modal - Later', false);
+        addEventListener('#skip-this-problem', 'Problem Difficulty modal - Skip problem', false);
+        addEventListener('#know-more-dashboard-page', 'Know more - Dashboard page', false);
     };
 
     var addProblemPageButtonsToGA = function() {
@@ -108,6 +127,10 @@
         addEventListener('#show-tags', 'Show tags', false);
         addEventListener('#problem-page-difficulty-button', 'Problem page difficulty', false);
         addEventListener('.problem-page-tag', 'Problem page tag', false);
+        addEventListener('.problem-setter-on-stopstalk', 'Problem author link on StopStalk', false);
+        addEventListener('.problem-setter-on-profile-site', 'Problem author link on Profile Site', false);
+        addEventListener('.problem-setter-text', 'Problem setter text without a link', false);
+        addEventListener('#suggest-trigger', 'Problem page - suggest tag trigger', false)
     };
 
     var addUserEditorialsButtonsToGA = function() {
@@ -184,6 +207,27 @@
         addEventListener('.read-editorial-problem-editorials-page', 'Read editorial - problem editorials page', false);
     };
 
+    var addDashboardPageToGA = function() {
+        addEventListener('.suggest-problem-card-easy', 'Cards - Suggest Easy Problem', false);
+        addEventListener('.suggest-problem-card-medium', 'Cards - Suggest Medium Problem', false);
+        addEventListener('.suggest-problem-card-hard', 'Cards - Suggest Hard Problem', false);
+        addEventListener('.upcoming-contests-card-view-all', 'Cards - Upcoming contests View All', false);
+        addEventListener('.recent-submissions-card-view-all', 'Cards - Recent submissions View All', false);
+        addEventListener('.add-more-friends-card-institute-search', 'Cards - Add more friends institute search', false);
+        addEventListener('.job-profile-card-update-preferences', 'Cards - Job profile update preferences', false);
+        addEventListener('.linked-accounts-card-update-now', 'Cards - Linked accounts update profile', false);
+        addEventListener('.linked-accounts-card-update-now', 'Cards - Linked accounts update profile', false);
+        addEventListener('.last-solved-problem-write-editorial', 'Cards - Last solved problem write editorial', false);
+        addEventListener('.last-solved-problem-suggest-tags', 'Cards - Last solved problem write editorial', false);
+        addEventListener('.last-solved-problem-suggest-difficulty', 'Cards - Last solved problem write editorial', false);
+        addEventListener('.trending-problems-card-view-all', 'Cards - Trending problems View All', false);
+        addEventListener('.accepted-streak-card-pick-problem', 'Cards - Accepted streak pick problem', false);
+        addEventListener('.day-streak-card-pick-problem', 'Cards - Day streak pick problem', false);
+        addEventListener('.search-by-tag-card-submit', 'Cards - Search by tag Submit', false, 'submit');
+        addEventListener('.atcoder-handle-card-update-now', 'Cards - Atcoder handle update now', false);
+    };
+
+
     $(document).ready(function() {
         addNavItemsToGA();
         addSubmissionPageButtonsToGA();
@@ -198,6 +242,7 @@
         addUserEditorialsPageToGA();
         addUserWiseEditorialsPageToGA();
         addProblemEditorialsPageToGA();
+        addDashboardPageToGA();
         addMiscellaneousToGA();
     });
 })(jQuery);

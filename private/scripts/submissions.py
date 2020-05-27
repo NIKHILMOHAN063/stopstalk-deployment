@@ -28,6 +28,7 @@ import datetime
 import utilities
 import sites
 from gevent import monkey
+from stopstalk_constants import *
 
 gevent.monkey.patch_all(thread=False)
 
@@ -40,10 +41,6 @@ nrtable = db.next_retrieval
 ptable = db.problem
 stable = db.submission
 
-SERVER_FAILURE = "SERVER_FAILURE"
-NOT_FOUND = "NOT_FOUND"
-OTHER_FAILURE = "OTHER_FAILURE"
-
 TIME_CONVERSION = "%Y-%m-%d %H:%M:%S"
 INVALID_HANDLES = None
 
@@ -51,9 +48,11 @@ failed_user_retrievals = []
 retrieval_type = None
 todays_date = datetime.datetime.today().date()
 uva_problem_dict = {}
+atcoder_problem_dict = {}
 metric_handlers = {}
 plink_to_id = {}
 todays_date_string = datetime.datetime.now().strftime("%Y-%m-%d")
+codechef_slugs = {}
 
 # ==============================================================================
 class Logger:
@@ -111,14 +110,6 @@ def concurrent_submission_retrieval_handler(action, user_id, custom):
         current.REDIS_CLIENT.set(redis_key, True, ex=1 * 60 * 60)
     elif action == "DEL":
         current.REDIS_CLIENT.delete(redis_key)
-
-# ------------------------------------------------------------------------------
-def populate_uva_problems():
-    global uva_problem_dict
-
-    ptable = uvadb.problem
-    uvaproblems = uvadb(ptable).select(ptable.problem_id, ptable.title)
-    uva_problem_dict = dict([(x.problem_id, x.title) for x in uvaproblems])
 
 # ------------------------------------------------------------------------------
 def flush_problem_stats():
@@ -209,22 +200,37 @@ def get_submissions(user_id,
         try:
             pname = submission[2].encode("utf-8", "ignore")
         except UnicodeDecodeError:
-            pname = str(pname)
+            pname = str(submission[2])
 
         pname = pname.replace("\"", "").replace("'", "")
         plink = submission[1]
+        pid = None
         if plink not in plink_to_id:
-            pid = ptable.insert(name=pname,
-                                link=plink,
-                                editorial_link=None,
-                                tags="['-']",
-                                editorial_added_on=todays_date_string,
-                                tags_added_on=todays_date_string,
-                                user_ids="",
-                                custom_user_ids="")
-            plink_to_id[plink] = pid
+            is_codechef_url = utilities.urltosite(plink) == "codechef"
+            if is_codechef_url:
+                slug = sites.codechef.Profile.get_slug(plink)
+                if slug in codechef_slugs:
+                    pid = codechef_slugs[slug]
+                else:
+                    pid = None
+
+            if pid is None:
+                pid = ptable.insert(name=pname,
+                                    link=plink,
+                                    editorial_link=None,
+                                    tags="['-']",
+                                    editorial_added_on=todays_date_string,
+                                    tags_added_on=todays_date_string,
+                                    user_ids="",
+                                    custom_user_ids="")
+                plink_to_id[plink] = pid
+
+            if is_codechef_url and pid is not None:
+                codechef_slugs[slug] = pid
         else:
             pid = plink_to_id[plink]
+
+        utilities.add_language_to_cache(submission[5])
 
         submission_insert_dict = {
             "user_id": user_id if not custom else None,
@@ -308,35 +314,61 @@ def update_stopstalk_rating(user_id, stopstalk_handle, custom):
                                  "site": submission[3],
                                  "problem_id": submission[4]})
 
-    final_rating = utilities.get_stopstalk_user_stats(user_submissions)["rating_history"]
+    final_rating = utilities.get_stopstalk_user_stats(stopstalk_handle,
+                                                      custom,
+                                                      user_submissions)["rating_history"]
     final_rating = dict(final_rating)
     today = str(datetime.datetime.now().date())
     current_rating = int(sum(final_rating[today]))
     update_params = dict(stopstalk_rating=current_rating)
+    record = None
+
     if custom:
-        cftable(user_id).update_record(**update_params)
+        record = cftable(user_id)
     else:
-        atable(user_id).update_record(**update_params)
+        record = atable(user_id)
+        current.REDIS_CLIENT.delete(utilities.get_user_record_cache_key(user_id))
+
+    record.update_record(**update_params)
 
     db.commit()
 
+    if custom == True:
+        # Don't need to do anything on global_leaderboard_cache if custom is true
+        return current_rating
+
     # Update global leaderboard cache
-    current_value = current.REDIS_CLIENT.get("global_leaderboard_cache")
+    current_value = current.REDIS_CLIENT.get(GLOBAL_LEADERBOARD_CACHE_KEY)
     if current_value is None:
         # Global leaderboard cache not present
         return current_rating
 
     import json
     current_value = json.loads(current_value)
+    reorder_leaderboard = False
     for row in current_value:
         if row[1] == stopstalk_handle:
             row[3] = current_rating
-            current_value = reorder_leaderboard_data(current_value)
-            current.REDIS_CLIENT.set("global_leaderboard_cache",
-                                     json.dumps(current_value),
-                                     ex=1 * 60 * 60)
-            return current_rating
+            reorder_leaderboard = True
+            break
 
+    if not reorder_leaderboard:
+        reorder_leaderboard = True
+        cf_count = db(cftable.user_id == record.id).count()
+        current_value.append((record.first_name + " " + record.last_name,
+                              record.stopstalk_handle,
+                              record.institute,
+                              record.stopstalk_rating,
+                              float(record.per_day_change),
+                              utilities.get_country_details(record.country),
+                              cf_count,
+                              0))
+
+    current_value = reorder_leaderboard_data(current_value)
+    current.REDIS_CLIENT.set(GLOBAL_LEADERBOARD_CACHE_KEY,
+                             json.dumps(current_value),
+                             ex=ONE_HOUR)
+    return current_rating
 
 # ------------------------------------------------------------------------------
 def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codechef_retrieval=False):
@@ -378,8 +410,13 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
         if Site.Profile.is_website_down():
             all_sites.remove(site)
 
+    common_influx_params = dict(stopstalk_handle=record.stopstalk_handle,
+                                retrieval_type=retrieval_type,
+                                value=1)
+
     for site in all_sites:
 
+        common_influx_params["site"] = site
         lower_site = site.lower()
         site_handle = record[lower_site + "_handle"]
         site_lr = lower_site + "_lr"
@@ -390,6 +427,9 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
         if is_daily_retrieval and \
            datetime.timedelta(days=nrtable_record[site_delay] / 3 + 1) + \
            last_retrieved.date() > todays_date:
+            utilities.push_influx_data("retrieval_stats",
+                                       dict(kind="skipped",
+                                            **common_influx_params))
             logger.log(site, "skipped")
             metric_handlers[lower_site]["skipped_retrievals"].increment_count("total", 1)
             skipped_retrieval.add(site)
@@ -399,6 +439,9 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
 
         if (site_handle, site) in INVALID_HANDLES:
             logger.log(site, "not found:" + site_handle)
+            utilities.push_influx_data("retrieval_stats",
+                                       dict(kind="not_found",
+                                            **common_influx_params))
             metric_handlers[lower_site]["handle_not_found"].increment_count("total", 1)
             record.update({site_lr: datetime.datetime.now()})
             should_clear_cache = True
@@ -413,12 +456,17 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
             start_retrieval_time = time.time()
             if site == "UVa":
                 submissions = site_method(last_retrieved, uva_problem_dict, is_daily_retrieval)
+            elif site == "AtCoder":
+                submissions = site_method(last_retrieved, atcoder_problem_dict, is_daily_retrieval)
             else:
                 submissions = site_method(last_retrieved, is_daily_retrieval)
             total_retrieval_time = time.time() - start_retrieval_time
             sites_retrieval_timings += total_retrieval_time
             metric_handlers[lower_site]["retrieval_times"].add_to_list("list", total_retrieval_time)
             if submissions in (SERVER_FAILURE, OTHER_FAILURE):
+                utilities.push_influx_data("retrieval_stats",
+                                           dict(kind=submissions.lower(),
+                                                **common_influx_params))
                 logger.log(site, submissions)
 
                 metric_handlers[lower_site]["retrieval_count"].increment_count("failure", 1)
@@ -427,6 +475,9 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
                 should_clear_cache = True
                 current.REDIS_CLIENT.sadd("website_down_" + site.lower(), record.stopstalk_handle)
             elif submissions == NOT_FOUND:
+                utilities.push_influx_data("retrieval_stats",
+                                           dict(kind="new_invalid_handle",
+                                                **common_influx_params))
                 logger.log(site, "new invalid handle:" + site_handle)
                 new_handle_not_found(site, site_handle)
                 # Update the last retrieved of an invalid handle as we don't
@@ -434,6 +485,9 @@ def retrieve_submissions(record, custom, all_sites=current.SITES.keys(), codeche
                 record.update({site_lr: datetime.datetime.now()})
                 should_clear_cache = True
             else:
+                utilities.push_influx_data("retrieval_stats",
+                                           dict(kind="success",
+                                                **common_influx_params))
                 submission_len = len(submissions)
                 metric_handlers[lower_site]["retrieval_count"].increment_count("success", 1)
                 metric_handlers[lower_site]["submission_count"].increment_count("total", submission_len)
@@ -582,8 +636,9 @@ def daily_retrieve():
             (atable.registration_key == "") # Unverified email
     registered_users = db(query).select()
 
-    query = (cftable.id % M == N) & (cftable.duplicate_cu == None)
-    custom_users = db(query).select()
+    # query = (cftable.id % M == N) & (cftable.duplicate_cu == None)
+    # custom_users = db(query).select()
+    custom_users = []
 
     return (registered_users, custom_users)
 
@@ -698,10 +753,18 @@ if __name__ == "__main__":
         print ("Invalid arguments")
         sys.exit()
 
-    populate_uva_problems()
-
+    uva_problem_dict = utilities.get_problem_mappings(uvadb,
+                                                      uvadb.problem,
+                                                      ["problem_id", "title"])
+    atcoder_problem_dict = utilities.get_problem_mappings(db,
+                                                          db.atcoder_problems,
+                                                          ["problem_identifier",
+                                                           "name"])
     links = db(ptable).select(ptable.id, ptable.link)
-    plink_to_id = dict([(x.link, x.id) for x in links])
+    for row in links:
+        plink_to_id[row.link] = row.id
+        if row.link.__contains__("www.codechef.com/PRACTICE"):
+            codechef_slugs[row.link.split("/")[-1]] = row.id
 
     # Get the handles which returned 404 before
     INVALID_HANDLES = db(db.invalid_handle).select()

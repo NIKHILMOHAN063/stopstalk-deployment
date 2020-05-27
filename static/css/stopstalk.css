@@ -15,6 +15,35 @@ input.form-control {
     color: #424242;
 }
 
+.problem-setter-href {
+    text-decoration: none;
+    margin-left: 5px;
+    cursor: pointer;
+    font-size: large;
+    white-space: nowrap;
+}
+
+.problem-setter-href a {
+    color: #424242;
+}
+
+.problem-setter-on-stopstalk {
+    border-bottom: 2px solid #d61e95;
+}
+
+.problem-setter-on-profile-site {
+    border-bottom: 2px solid #f7ba0f;
+}
+
+.problem-setter-text {
+    text-decoration: none;
+    border-bottom: 2px solid #cabfbf;
+    margin-left: 5px;
+    color: black;
+    font-size: large;
+    white-space: nowrap;
+}
+
 body {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -182,6 +211,23 @@ a {
 
 .cuser-count-button:visited {
     background-color: darkcyan;
+    opacity: 1;
+}
+
+.user-blacklist-button {
+    background-color: #f5f5f5;
+    height: 20px;
+    width: 20px;
+    line-height: 15px;
+}
+
+.user-blacklist-button:hover, .user-blacklist-button:focus {
+    opacity: 0.8;
+    background-color: #f5f5f5;
+}
+
+.user-blacklist-button:visited {
+    background-color: #f5f5f5;
     opacity: 1;
 }
 
@@ -525,6 +571,11 @@ nav ul a:hover {
     cursor: pointer;
 }
 
+.profile-page-site-profile-url {
+    margin-left: 15px;
+    margin-right: 15px;
+}
+
 .preview-editor-wrapper {
     cursor: text;
     user-select: text;
@@ -559,4 +610,56 @@ nav ul a:hover {
 
 .tap-target {
     background-color: #f0ff03e8;
+}
+
+.add-to-todo-list.chip {
+    height: 20px;
+    line-height: 20px;
+    color: white;
+    font-size: 12px;
+    margin-left: 6px;
+    background-color: #190c88;
+    padding-left: 10px;
+    display: none;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.problem-search-tags-column {
+    text-align: left !important;
+    max-width: 450px;
+}
+
+.left-align-problem {
+    text-align: left !important;
+}
+
+.problem-search-name-column {
+    text-align: left !important;
+    padding-left: 10px;
+}
+
+.w2p-form-button {
+    margin-left: 10px;
+}
+
+.stopstalk-dashboard-card-cta {
+    margin-left: 10px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.stopstalk-dashboard-card .card-content {
+    font-size: 17px;
+}
+
+.parent-site-icon-small {
+    height: 30px;
+    width: 30px;
+}
+
+.parent-site-icon-very-small {
+    height: 18px;
+    width: 18px;
+    margin-bottom: -4px;
 }

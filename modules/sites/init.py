@@ -22,20 +22,25 @@
 
 import re, requests, ast, time
 import parsedatetime as pdt
+import urllib3
 import datetime
 import bs4
 import utilities
 from gluon import current
 from bs4 import BeautifulSoup
 from health_metrics import MetricHandler
+from stopstalk_constants import *
 
-user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.139 Safari/537.36"
+urllib3.disable_warnings()
 
-# Constants to be used in case of request failures
-SERVER_FAILURE = "SERVER_FAILURE"
-NOT_FOUND = "NOT_FOUND"
-OTHER_FAILURE = "OTHER_FAILURE"
-REQUEST_FAILURES = (SERVER_FAILURE, NOT_FOUND, OTHER_FAILURE)
+# -----------------------------------------------------------------------------
+def log_time_things(request_time_metric_handler, start_request_time, site):
+    time_difference = time.time() - start_request_time
+    request_time_metric_handler.add_to_list("list", time_difference)
+    utilities.push_influx_data("crawling_response_times",
+                               dict(kind="general_for_now",
+                                    site=site,
+                                    value=time_difference))
 
 # -----------------------------------------------------------------------------
 def get_request(url, headers={}, timeout=current.TIMEOUT, params={}, is_daily_retrieval=False):
@@ -67,7 +72,7 @@ def get_request(url, headers={}, timeout=current.TIMEOUT, params={}, is_daily_re
                                                 site,
                                                 is_daily_retrieval)
 
-    headers.update({"User-Agent": user_agent})
+    headers.update({"User-Agent": COMMON_USER_AGENT})
 
     i = 0
     while i < current.MAX_TRIES_ALLOWED:
@@ -77,24 +82,25 @@ def get_request(url, headers={}, timeout=current.TIMEOUT, params={}, is_daily_re
                                     headers=headers,
                                     params=params,
                                     proxies=current.PROXY,
-                                    timeout=timeout)
+                                    timeout=timeout,
+                                    verify=False)
         except Exception as e:
             print e, url
             request_metric_handler.increment_count("failure", 1)
-            request_time_metric_handler.add_to_list("list", time.time() - start_request_time)
+            log_time_things(request_time_metric_handler, start_request_time, site)
             return SERVER_FAILURE
 
         if response.status_code == 200:
-            request_time_metric_handler.add_to_list("list", time.time() - start_request_time)
+            log_time_things(request_time_metric_handler, start_request_time, site)
             request_metric_handler.increment_count("success", 1)
             return response
         elif response.status_code == 404 or response.status_code == 400:
-            request_time_metric_handler.add_to_list("list", time.time() - start_request_time)
+            log_time_things(request_time_metric_handler, start_request_time, site)
             # User not found
             # 400 for CodeForces users
             return NOT_FOUND
         elif response.status_code == 429 or response.status_code == 401:
-            request_time_metric_handler.add_to_list("list", time.time() - start_request_time)
+            log_time_things(request_time_metric_handler, start_request_time, site)
             request_metric_handler.increment_count("failure", 1)
             # For CodeChef API rate limiting, don't retry
             # 401 is raised when a newer access token is generated
@@ -103,7 +109,7 @@ def get_request(url, headers={}, timeout=current.TIMEOUT, params={}, is_daily_re
                 current.REDIS_CLIENT.delete("codechef_access_token")
             return OTHER_FAILURE
         else:
-            request_time_metric_handler.add_to_list("list", time.time() - start_request_time)
+            log_time_things(request_time_metric_handler, start_request_time, site)
             request_metric_handler.increment_count("failure", 1)
 
         i += 1

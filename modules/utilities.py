@@ -22,12 +22,60 @@
 
 import re
 import datetime
+import time
 import json
 from boto3 import client
+from socket import gethostname
+from requests.exceptions import ConnectionError
 from health_metrics import MetricHandler
 from gluon import current, IMG, DIV, TABLE, THEAD, HR, H5, \
                   TBODY, TR, TH, TD, A, SPAN, INPUT, I, \
-                  TEXTAREA, SELECT, OPTION, URL, BUTTON
+                  TEXTAREA, SELECT, OPTION, URL, BUTTON, TAG
+from gluon.storage import Storage
+from stopstalk_constants import *
+from influxdb_wrapper import get_series_helper
+
+# -----------------------------------------------------------------------------
+def push_influx_data(measurement, points, app_name="cron"):
+
+    if current.environment != "production":
+        return
+
+    try:
+        SeriesHelperClass = get_series_helper(
+                                measurement,
+                                INFLUX_MEASUREMENT_SCHEMAS[measurement]["fields"],
+                                INFLUX_MEASUREMENT_SCHEMAS[measurement]["tags"]
+                            )
+
+        if isinstance(points, dict):
+            points = [points]
+
+        for point in points:
+            point.update(host=gethostname(),
+                         app_name=app_name)
+            SeriesHelperClass(**point)
+
+        SeriesHelperClass.commit()
+    except ConnectionError:
+        print "Can't connect to influxdb"
+        return
+
+# -----------------------------------------------------------------------------
+def get_problem_mappings(db_obj, table, fields):
+    problems = db_obj(table).select(table[fields[0]], table[fields[1]])
+    return dict([(x[fields[0]], x[fields[1]]) for x in problems])
+
+# -----------------------------------------------------------------------------
+def is_stopstalk_admin(user_id):
+    return user_id in STOPSTALK_ADMIN_USER_IDS
+
+# -----------------------------------------------------------------------------
+def get_key_from_dict(actual_dict, key, no_key_value):
+    try:
+        return actual_dict[key]
+    except KeyError:
+        return no_key_value
 
 # -----------------------------------------------------------------------------
 def is_valid_stopstalk_handle(handle):
@@ -36,6 +84,14 @@ def is_valid_stopstalk_handle(handle):
         return (group == handle) and handle[:4] != "cus_"
     except AttributeError:
         return False
+
+# -----------------------------------------------------------------------------
+def add_language_to_cache(language):
+    if language in ["", "-"]:
+        return
+
+    current.REDIS_CLIENT.sadd("all_submission_languages", language)
+    return
 
 # -----------------------------------------------------------------------------
 def prepend_custom_identifier(form):
@@ -72,13 +128,131 @@ def init_metric_handlers(log_to_redis):
     return metric_handlers
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+def pick_a_problem(user_id, custom=False, **args):
+    db = current.db
+    ptable = db.problem
+    solved_problems, unsolved_problems = get_solved_problems(user_id, custom)
+
+    query = ~ptable.id.belongs(solved_problems.union(unsolved_problems))
+
+    if args["kind"] == "random":
+        record = db(query).select(ptable.id, orderby="<random>").first()
+    elif args["kind"] == "suggested_tag":
+        sttable = db.suggested_tags
+        ttable = db.tag
+        tag_query = (sttable.tag_id == ttable.id) & \
+                    (ttable.value == args["tag_category"])
+        pids = db(tag_query).select(sttable.problem_id, distinct=True)
+        pids = set([x.problem_id for x in pids])
+        query &= ptable.id.belongs(pids)
+        record = db(query).select(ptable.id, orderby="<random>").first()
+
+    return record.id
+
+# ------------------------------------------------------------------------------
+def get_user_record_cache_key(user_id):
+    return "auth_user_cache::user_" + str(user_id)
+
+# ------------------------------------------------------------------------------
+def get_user_records(record_values,
+                     search_key="id",
+                     dict_key="id",
+                     just_one_record=False):
+    """
+        Cache the user records requested in redis if not present and return the
+        dictionary of record details based on the dict_key passed as the key
+
+        @param record_values(List): List of values to query with
+        @param search_key(String); "id" or "stopstalk_handle"
+        @param dict_key(String): "id" or "stopstalk_handle" which will be
+                                 used as key in the return value
+        @param just_one_record(Boolean): If just return the record value instead
+                                         of the key being dict_key
+
+        @return (Storage): Storage dictionary of the record details
+    """
+
+    if search_key not in ["id", "stopstalk_handle"] or \
+       dict_key not in ["id", "stopstalk_handle"]:
+        return None
+
+    def _get_result_key(user_details):
+        return user_details[dict_key]
+
+    db = current.db
+    atable = db.auth_user
+
+    if search_key == "stopstalk_handle":
+        user_ids = db(atable.stopstalk_handle.belongs(record_values)).select(atable.id)
+        record_values = [x.id for x in user_ids]
+        search_key = "id"
+
+    result = {}
+    to_be_fetched = []
+
+    for user_id in record_values:
+        redis_key = get_user_record_cache_key(user_id)
+        val = current.REDIS_CLIENT.get(redis_key)
+        if val is None:
+            to_be_fetched.append(user_id)
+        else:
+            # User details present in redis already
+            val = Storage(json.loads(val))
+            result[_get_result_key(val)] = val
+
+    records = db(atable.id.belongs(to_be_fetched)).select()
+    records = dict([x.id, x.as_json()] for x in records)
+    for user_id in records.keys():
+        redis_key = get_user_record_cache_key(user_id)
+        val = Storage(json.loads(records[user_id]))
+        current.REDIS_CLIENT.set(redis_key, records[user_id],
+                                 ex=1 * 60 * 60)
+        result[_get_result_key(val)] = val
+
+    if just_one_record:
+        return result.values()[0] if len(result) else None
+    else:
+        return result
+
+# ------------------------------------------------------------------------------
 def get_boto3_client():
     return client("s3",
                   aws_access_key_id=current.s3_access_key_id,
                   aws_secret_access_key=current.s3_secret_access_key)
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+def get_contests():
+
+    cache_value = current.REDIS_CLIENT.get(CONTESTS_CACHE_KEY)
+    if cache_value:
+        return json.loads(cache_value)
+
+    today = datetime.datetime.today()
+    today = datetime.datetime.strptime(str(today)[:-7],
+                                       "%Y-%m-%d %H:%M:%S")
+
+    start_date = today.date()
+    end_date = start_date + datetime.timedelta(90)
+    url = "https://contesttrackerapi.herokuapp.com/"
+
+    from urllib3 import disable_warnings
+    import requests
+    disable_warnings()
+
+    response = requests.get(url, verify=False)
+    if response.status_code == 200:
+        response = response.json()["result"]
+        current.REDIS_CLIENT.set(CONTESTS_CACHE_KEY,
+                                 json.dumps([response["ongoing"],
+                                             response["upcoming"]]),
+                                 ex=ONE_HOUR)
+    else:
+        return None, None
+
+    return response["ongoing"], response["upcoming"]
+
+# ------------------------------------------------------------------------------
 def merge_duplicate_problems(original_id, duplicate_id):
     """
         Merge two duplicate problems and remove the duplicate problem from database
@@ -197,6 +371,9 @@ def get_solved_problems(user_id, custom=False):
         @return(Tuple): List of solved and unsolved problems
     """
 
+    if user_id is None:
+        return None
+
     def _settify_return_value(data):
         return map(lambda x: set(x), data)
 
@@ -220,7 +397,7 @@ def get_solved_problems(user_id, custom=False):
 
     data = [list(solved_problems), list(unsolved_problems)]
     current.REDIS_CLIENT.set(redis_cache_key,
-                             json.dumps(data, separators=(",", ":")),
+                             json.dumps(data, separators=JSON_DUMP_SEPARATORS),
                              ex=1 * 60 * 60)
 
     return _settify_return_value(data)
@@ -274,12 +451,15 @@ def get_next_problem_to_suggest(user_id, problem_id=None):
         return dict(result=result)
 
 # -----------------------------------------------------------------------------
-def get_link_class(problem_id, user_id):
+def get_link_class(problem_id, user_id, solved_result=None):
     link_class = "unattempted-problem"
     if user_id is None:
         return link_class, (" ".join(link_class.split("-"))).capitalize()
 
-    solved_problems, unsolved_problems = get_solved_problems(user_id, False)
+    if solved_result is None:
+        solved_problems, unsolved_problems = get_solved_problems(user_id, False)
+    else:
+        solved_problems, unsolved_problems = solved_result
 
     link_class = ""
     if problem_id in unsolved_problems:
@@ -307,6 +487,44 @@ def get_stopstalk_handle(user_id, custom):
     table = current.db.custom_friend if custom else current.db.auth_user
     return table(user_id).stopstalk_handle
 
+# -----------------------------------------------------------------------------
+def get_rating_information(user_id, custom, is_logged_in):
+    db = current.db
+    stopstalk_handle = get_stopstalk_handle(user_id, custom)
+    redis_cache_key = "profile_page:user_stats_" + stopstalk_handle
+
+    # Check if data is present in REDIS
+    data = current.REDIS_CLIENT.get(redis_cache_key)
+    if data:
+        result = json.loads(data)
+        if not is_logged_in:
+            del result["rating_history"]
+        if "problems_authored_count" not in result:
+            result["problems_authored_count"] = 0
+        return result
+
+    stable = db.submission
+
+    query = (stable["custom_user_id" if custom else "user_id"] == user_id)
+    rows = db(query).select(stable.time_stamp,
+                            stable.problem_id,
+                            stable.status,
+                            stable.site,
+                            orderby=stable.time_stamp)
+
+    # Returns rating history, accepted & max streak (day and accepted),
+    result = get_stopstalk_user_stats(stopstalk_handle,
+                                      custom,
+                                      rows.as_list())
+
+    if is_logged_in:
+        current.REDIS_CLIENT.set(redis_cache_key,
+                                 json.dumps(result, separators=JSON_DUMP_SEPARATORS),
+                                 ex=1 * 60 * 60)
+    elif "rating_history" in result:
+        del result["rating_history"]
+
+    return result
 # -----------------------------------------------------------------------------
 def handles_updated(record, form):
     """
@@ -338,6 +556,88 @@ def pretty_string(all_items):
     else:
         return ", ".join(all_items[:-1]) + " and " + all_items[-1]
 
+# ------------------------------------------------------------------------------
+def get_problems_table(all_problems,
+                       logged_in_user_id,
+                       problem_with_user_editorials=None):
+    T = current.T
+    db = current.db
+    uetable = db.user_editorials
+    table = TABLE(_class="bordered centered")
+    thead = THEAD(TR(TH(T("Problem Name"), _class="problem-search-name-column"),
+                     TH(T("Problem URL")),
+                     TH(T("Site")),
+                     TH(T("Accuracy")),
+                     TH(T("Users solved")),
+                     TH(T("Editorial")),
+                     TH(T("Tags"), _class="left-align-problem")))
+
+    table.append(thead)
+    tbody = TBODY()
+
+    if problem_with_user_editorials is None:
+        rows = db(uetable.verification == "accepted").select(uetable.problem_id)
+        problem_with_user_editorials = set([x["problem_id"] for x in rows])
+
+    solved_result = get_solved_problems(logged_in_user_id)
+
+    for problem in all_problems:
+        tr = TR()
+
+        link_class, link_title = get_link_class(problem["id"],
+                                                logged_in_user_id,
+                                                solved_result)
+
+        tr.append(TD(problem_widget(problem["name"],
+                                    problem["link"],
+                                    link_class,
+                                    link_title,
+                                    problem["id"]),
+                     _class="problem-search-name-column"))
+        tr.append(TD(A(I(_class="fa fa-link"),
+                       _href=problem["link"],
+                       _class="tag-problem-link",
+                       _target="_blank")))
+        tr.append(TD(IMG(_src=current.get_static_url("images/" + \
+                                    urltosite(problem["link"]) + \
+                                    "_small.png"),
+                         _style="height: 30px; width: 30px;")))
+        if problem["solved_submissions"] and problem["total_submissions"]:
+            tr.append(TD("%.2f" % (problem["solved_submissions"]  * 100.0 / \
+                                   problem["total_submissions"])))
+        else:
+            tr.append(TD("-"))
+        tr.append(TD(problem["user_count"] + problem["custom_user_count"]))
+
+        if problem["id"] in problem_with_user_editorials or \
+           problem["editorial_link"] not in ("", None):
+            tr.append(TD(A(I(_class="fa fa-book"),
+                           _href=URL("problems",
+                                     "editorials",
+                                     args=problem["id"]),
+                           _target="_blank",
+                           _class="problem-search-editorial-link")))
+        else:
+            tr.append(TD())
+
+        td = TD(_class="left-align-problem")
+        all_tags = eval(problem["tags"])
+        for tag in all_tags:
+            td.append(DIV(A(tag,
+                            _href=URL("problems",
+                                      "tag",
+                                      vars={"q": tag.encode("utf8"), "page": 1}),
+                            _class="tags-chip",
+                            _style="color: white;",
+                            _target="_blank"),
+                          _class="chip"))
+            td.append(" ")
+        tr.append(td)
+        tbody.append(tr)
+
+    table.append(tbody)
+
+    return table
 # -----------------------------------------------------------------------------
 def urltosite(url):
     """
@@ -346,22 +646,12 @@ def urltosite(url):
         @param url (String): Site URL
         @return url (String): Site
     """
-    if url.__contains__("uva.onlinejudge.org") or url.__contains__("uhunt.felix-halim.net"):
-        return "uva"
-    if url.__contains__("acm.timus.ru"):
-        return "timus"
-    if url.__contains__("codechef.com"):
-        return "codechef"
-    if url == current.spoj_lambda_url:
-        return "spoj"
-    # Note: try/except is not added because this function is not to
-    #       be called for invalid problem urls
-    site = re.search(r"www\..*?\.com", url).group()
+    import sites
+    for site in current.SITES:
+        if getattr(sites, site.lower()).Profile.is_valid_url(url):
+            return site.lower()
 
-    # Remove www. and .com from the url to get the site
-    site = site[4:-4]
-
-    return site
+    return "unknown_site"
 
 # -----------------------------------------------------------------------------
 def problem_widget(name,
@@ -384,7 +674,7 @@ def problem_widget(name,
         @return (DIV)
     """
 
-    problem_div = SPAN()
+    problem_div = DIV(_style="display: inline;")
     if anchor:
         problem_div.append(A(name,
                              _href=URL("problems",
@@ -402,12 +692,9 @@ def problem_widget(name,
                                 _title=link_title))
 
     if current.auth.is_logged_in() and disable_todo is False:
-        problem_div.append(I(_class="add-to-todo-list fa fa-check-square-o tooltipped",
-                             _style="padding-left: 10px; display: none; cursor: pointer;",
-                             data={"position": "right",
-                                   "delay": "10",
-                                   "tooltip": "Add problem to Todo List",
-                                   "pid": problem_id}))
+        problem_div.append(SPAN("Add to Todo",
+                                _class="chip add-to-todo-list",
+                                data={"pid": problem_id}))
 
     return problem_div
 
@@ -456,6 +743,10 @@ def get_stopstalk_rating(parts):
             "total": sum(rating_components)}
 
 # ----------------------------------------------------------------------------
+def get_country_details(country):
+    return [current.all_countries[country], country] if country in current.all_countries else None
+
+# ----------------------------------------------------------------------------
 def clear_profile_page_cache(stopstalk_handle):
     """
         Clear all the data in REDIS corresponding to stopstalk_handle
@@ -466,12 +757,13 @@ def clear_profile_page_cache(stopstalk_handle):
     current.REDIS_CLIENT.delete("profile_page:user_stats_" + stopstalk_handle)
 
 # ----------------------------------------------------------------------------
-def get_stopstalk_user_stats(user_submissions):
+def get_stopstalk_user_stats(stopstalk_handle, custom, user_submissions):
 
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # Initializations
     solved_problem_ids = set([])
     all_attempted_pids = set([])
+    problems_authored_count = 0
     sites_solved_count = {}
     site_accuracies = {}
     for site in current.SITES:
@@ -484,8 +776,11 @@ def get_stopstalk_user_stats(user_submissions):
     curr_day_streak = max_day_streak = 0
     curr_accepted_streak = max_accepted_streak = 0
 
+    if not custom:
+        problems_authored_count = len(get_problems_authored_by(stopstalk_handle))
+
     if len(user_submissions) == 0:
-        return final_rating
+        return {"problems_authored_count": problems_authored_count}
 
     INITIAL_DATE = datetime.datetime.strptime(current.INITIAL_DATE,
                                               "%Y-%m-%d %H:%M:%S").date()
@@ -629,8 +924,62 @@ def get_stopstalk_user_stats(user_submissions):
         site_accuracies=site_accuracies,
         solved_problems_count=len(solved_problem_ids),
         total_problems_count=len(all_attempted_pids),
-        calendar_data=calendar_data
+        calendar_data=calendar_data,
+        problems_authored_count=problems_authored_count
     )
+
+# ------------------------------------------------------------------------------
+def get_problems_authored_by(stopstalk_handle):
+    db = current.db
+    atable = db.auth_user
+    ptable = db.problem
+    pstable = db.problem_setters
+
+    problems = []
+
+    query = (atable.stopstalk_handle == stopstalk_handle) & \
+            (atable.blacklisted == False) & \
+            (atable.registration_key == "")
+
+    user = db(query).select().first()
+    if user is None:
+        return problems
+
+    site_to_handle = {}
+    for site in current.SITES:
+        handle = user[site.lower() + "_handle"]
+        if handle:
+            site_to_handle[site.lower()] = handle
+
+    records = db(pstable.handle.belongs(site_to_handle.values())).select()
+    for record in records:
+        problem_record = ptable(record.problem_id)
+        site = urltosite(problem_record.link)
+        if user[site + "_handle"] == record.handle:
+            problems.append(problem_record)
+
+    return problems
+
+# -----------------------------------------------------------------------------
+def should_show_stopstalk_ads(page_genre, stopstalk_handle=None):
+    return False
+
+    # If user is not logged in
+    user_logged_in = current.auth.is_logged_in()
+    if not user_logged_in or \
+       (page_genre == "profile" and \
+        stopstalk_handle is None):
+        return True
+
+    if page_genre == "profile":
+        # Whitelisted set of stopstalk handles
+        starting_regexes = ["17", "18", "19", "20", "21", "22"]
+        start_condition = any([stopstalk_handle.startswith(x) for x in starting_regexes])
+        return start_condition
+    elif not user_logged_in:
+        return True
+    else:
+        return False
 
 # -----------------------------------------------------------------------------
 def materialize_form(form, fields):
@@ -676,11 +1025,11 @@ def materialize_form(form, fields):
                                             _class="file-path",
                                             _placeholder=label.components[0]),
                                       _class="file-path-wrapper"),
-                                  _class="col input-field file-field offset-s3 s6")
+                                  _class="col input-field file-field offset-s2 s8")
             elif _type == "checkbox":
                 # Checkbox input field does not require input-field class
                 input_field = DIV(_controls, label,
-                                  _class="col offset-s3 s6")
+                                  _class="col offset-s2 s8")
         if isinstance(controls, SPAN):
             # Mostly for ids which cannot be edited by user
             _controls = INPUT(_value=controls.components[0],
@@ -707,7 +1056,7 @@ def materialize_form(form, fields):
             # Note now label will be the first element
             # of Select input whose value would be ""
             input_field = DIV(_controls,
-                              _class="col offset-s3 s6")
+                              _class="col offset-s2 s8")
         elif isinstance(controls, A):
             # For the links in the bottom while updating tables like auth_user
             label = ""
@@ -719,7 +1068,7 @@ def materialize_form(form, fields):
 
         if input_field is None:
             input_field = DIV(_controls, label,
-                              _class="input-field col offset-s3 s6")
+                              _class="input-field col offset-s2 s8")
         curr_div.append(input_field)
 
         if field_tooltip:
@@ -743,7 +1092,7 @@ def get_problem_details(problem_id):
         precord = ptable(problem_id)
         result = {"name": precord.name, "link": precord.link}
         current.REDIS_CLIENT.set(redis_cache_key,
-                                 json.dumps(result, separators=(",", ":")),
+                                 json.dumps(result, separators=JSON_DUMP_SEPARATORS),
                                  ex=1 * 60 * 60)
     else:
         result = json.loads(pdetails)
@@ -751,12 +1100,13 @@ def get_problem_details(problem_id):
     return result
 
 # -----------------------------------------------------------------------------
-def render_table(submissions, duplicates=[], user_id=None):
+def render_table(submissions, duplicates=[], logged_in_user_id=None):
     """
         Create the HTML table from submissions
 
         @param submissions (Dict): Dictionary of submissions to display
         @param duplicates (List): List of duplicate user ids
+        @param logged_in_user_id (Long/None): User id of the logged in user
 
         @return (TABLE):  HTML TABLE containing all the submissions
     """
@@ -777,16 +1127,18 @@ def render_table(submissions, duplicates=[], user_id=None):
     table.append(THEAD(TR(TH(T("Name")),
                           TH(T("Site Profile")),
                           TH(T("Time of submission")),
-                          TH(T("Problem")),
+                          TH(T("Problem"), _class="left-align-problem"),
                           TH(T("Language")),
                           TH(T("Status")),
                           TH(T("Points")),
                           TH(T("View/Download Code")))))
 
     tbody = TBODY()
-    # Dictionary to optimize lookup for solved and unsolved problems
-    # Multiple lookups in the main set is bad
-    pid_to_class = {}
+    solved_result = get_solved_problems(logged_in_user_id)
+    problem_ids = set([x.problem_id for x in submissions])
+    pid_to_record = {}
+    for pid in problem_ids:
+        pid_to_record[pid] = get_problem_details(pid)
 
     for submission in submissions:
         span = SPAN()
@@ -835,20 +1187,18 @@ def render_table(submissions, duplicates=[], user_id=None):
 
         append(TD(submission.time_stamp, _class="stopstalk-timestamp"))
 
-        link_class = ""
         problem_id = submission.problem_id
-        if pid_to_class.has_key(problem_id):
-            link_class, link_title = pid_to_class[problem_id]
-        else:
-            link_class, link_title = get_link_class(problem_id, user_id)
-            pid_to_class[problem_id] = (link_class, link_title)
+        link_class, link_title = get_link_class(problem_id,
+                                                logged_in_user_id,
+                                                solved_result)
 
-        problem_details = get_problem_details(submission.problem_id)
+        problem_details = pid_to_record[problem_id]
         append(TD(problem_widget(problem_details["name"],
                                  problem_details["link"],
                                  link_class,
                                  link_title,
-                                 submission.problem_id)))
+                                 submission.problem_id),
+                  _class="left-align-problem"))
         append(TD(submission.lang))
         append(TD(IMG(_src=current.get_static_url("images/" + submission.status + ".jpg"),
                       _title=status_dict[submission.status],
@@ -901,105 +1251,16 @@ def render_table(submissions, duplicates=[], user_id=None):
 
     return table
 
-# ----------------------------------------------------------------------------
-def render_trending_table(caption, problems, column_name, user_id):
-    """
-        Create trending table from the rows
-    """
-    T = current.T
 
-    table = TABLE(_class="bordered centered")
-    thead = THEAD(TR(TH(T("Problem")),
-                     TH(T("Recent Submissions")),
-                     TH(column_name)))
-    table.append(thead)
-    tbody = TBODY()
+# ------------------------------------------------------------------------------
+def get_actual_site(lower_site):
+    temp_sites_hash = {}
+    for site in current.SITES:
+        temp_sites_hash[site.lower()] = site
 
-    for problem in problems:
-        tr = TR()
-        link_class, link_title = get_link_class(problem[0], user_id)
+    return temp_sites_hash[lower_site] if lower_site in temp_sites_hash else lower_site
 
-        tr.append(TD(problem_widget(problem[1]["name"],
-                                    problem[1]["link"],
-                                    link_class,
-                                    link_title,
-                                    problem[0])))
-        tr.append(TD(problem[1]["total_submissions"]))
-        tr.append(TD(len(problem[1]["users"]) + \
-                     len(problem[1]["custom_users"])))
-        tbody.append(tr)
-
-    table.append(tbody)
-    table = DIV(H5(caption, _class="center"), HR(), table)
-
-    return table
-
-# ----------------------------------------------------------------------------
-def compute_trending_table(submissions_list, table_type, user_id=None):
-    """
-        Create trending table from the rows
-
-        @params submission_list (Rows): Submissions to be considered
-        @params table_type (String): friends / global
-        @params user_id (Long): ID of signed in user else None
-    """
-
-    T = current.T
-    if table_type == "friends":
-        table_header = T("Trending among friends")
-        column_name = T("Friends")
-    else:
-        table_header = T("Trending Globally")
-        column_name = T("Users")
-
-    if len(submissions_list) == 0:
-        table = TABLE(_class="bordered centered")
-        thead = THEAD(TR(TH(T("Problem")),
-                         TH(T("Recent Submissions")),
-                         TH(column_name)))
-        table.append(thead)
-        table.append(TBODY(TR(TD("Not enough data to show", _colspan=3))))
-        return table
-
-    # Sort the rows according to the number of users
-    # who solved the problem in last PAST_DAYS
-    custom_compare = lambda x: (len(x[1]["users"]) + \
-                                len(x[1]["custom_users"]),
-                                x[1]["total_submissions"])
-
-    problems_dict = {}
-    for submission in submissions_list:
-        problem_details = get_problem_details(submission.problem_id)
-        plink = problem_details["link"]
-        pname = problem_details["name"]
-        uid = submission.user_id
-        cid = submission.custom_user_id
-        problem_id = submission.problem_id
-
-        if problem_id not in problems_dict:
-            problems_dict[problem_id] = {"name": pname,
-                                         "total_submissions": 0,
-                                         "users": set([]),
-                                         "custom_users": set([]),
-                                         "link": plink}
-
-        pdict = problems_dict[problem_id]
-        pdict["total_submissions"] += 1
-        if uid:
-            pdict["users"].add(uid)
-        else:
-            pdict["custom_users"].add(cid)
-
-    trending_problems = sorted(problems_dict.items(),
-                               key=custom_compare,
-                               reverse=True)
-
-    return render_trending_table(table_header,
-                                 trending_problems[:current.PROBLEMS_PER_PAGE],
-                                 column_name,
-                                 user_id)
-
-# ----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 def get_profile_url(site, handle):
     """
         Get the link to the site profile of a user
@@ -1013,12 +1274,15 @@ def get_profile_url(site, handle):
     if handle == "" or handle is None:
         return "NA"
 
+    site = get_actual_site(site)
+
     url_mappings = {"CodeChef": "users/",
                     "CodeForces": "profile/",
                     "HackerEarth": "users/",
                     "HackerRank": "",
                     "Spoj": "users/",
-                    "Timus": "author.aspx?id="}
+                    "Timus": "author.aspx?id=",
+                    "AtCoder": "users/"}
 
     if site == "UVa":
         uvadb = current.uvadb
@@ -1037,6 +1301,51 @@ def get_profile_url(site, handle):
 
     else:
         return "%s%s%s" % (current.SITES[site], url_mappings[site], handle)
+
+# ----------------------------------------------------------------------------
+def problem_setters_widget(handles, site):
+    """
+        Get the UI widget to be shown for problem setters
+
+        @param handles (List of String): Site handles of the problem setters
+        @param site (String): Site for which the problem is set
+
+        @return (HTML): HTML to be shown for a problem setter
+    """
+
+    # Take only unique problem setters
+    handles = set(handles)
+
+    db = current.db
+    atable = db.auth_user
+    site_column = site.lower() + "_handle"
+    query = (atable[site_column].belongs(handles)) & \
+            (atable.blacklisted == False)
+    rows = db(query).select(atable[site_column],
+                            atable.stopstalk_handle)
+    mapping = dict([(x[site_column], x.stopstalk_handle) for x in rows])
+    html_value = DIV(_style="max-width: 500px; overflow: scroll; height: 45px;")
+    for handle in handles:
+        if handle in mapping:
+            html_value.append(SPAN(A(handle,
+                                     _href=URL("user",
+                                               "profile",
+                                               args=mapping[handle]),
+                                     _target="_blank"),
+                                   _class="problem-setter-on-stopstalk " + \
+                                          "problem-setter-href"))
+        elif site != "Timus":
+            html_value.append(SPAN(A(handle,
+                                     _href=get_profile_url(site, handle),
+                                     _target="_blank"),
+                                   _class="problem-setter-on-profile-site " + \
+                                          "problem-setter-href",
+                                   _style="white-space: nowrap;"))
+        else:
+            html_value.append(SPAN(handle,
+                                   _class="problem-setter-text"))
+
+    return html_value
 
 # ----------------------------------------------------------------------------
 def render_user_editorials_table(user_editorials,
@@ -1060,19 +1369,19 @@ def render_user_editorials_table(user_editorials,
     T = current.T
 
     user_ids = set([x.user_id for x in user_editorials])
-    users = db(atable.id.belongs(user_ids)).select()
-    user_mappings = {}
-    for user in users:
-        user_mappings[user.id] = user
+    user_mappings = get_user_records(user_ids, "id", "id", False)
 
     query = (ptable.id.belongs([x.problem_id for x in user_editorials]))
     problem_records = db(query).select(ptable.id, ptable.name, ptable.link)
+
     precords = {}
     for precord in problem_records:
         precords[precord.id] = {"name": precord.name, "link": precord.link}
 
     table = TABLE(_class="centered user-editorials-table")
-    thead = THEAD(TR(TH(T("Problem")),
+
+    thead = THEAD(TR(TH(T("Problem"), _class="left-align-problem"),
+                     TH(T("Site")),
                      TH(T("Editorial By")),
                      TH(T("Added on")),
                      TH(T("Votes")),
@@ -1082,6 +1391,7 @@ def render_user_editorials_table(user_editorials,
                      "rejected": "red",
                      "pending": "blue"}
 
+    solved_result = get_solved_problems(logged_in_user_id)
     for editorial in user_editorials:
         if logged_in_user_id != 1 and user_id != editorial.user_id and editorial.verification != "accepted":
             continue
@@ -1089,12 +1399,20 @@ def render_user_editorials_table(user_editorials,
         user = user_mappings[editorial.user_id]
         record = precords[editorial.problem_id]
         number_of_votes = len(editorial.votes.split(",")) if editorial.votes else 0
-        link_class, link_title = get_link_class(editorial.problem_id, logged_in_user_id)
+        link_class, link_title = get_link_class(editorial.problem_id,
+                                                logged_in_user_id,
+                                                solved_result)
         tr = TR(TD(problem_widget(record["name"],
                                   record["link"],
                                   link_class,
                                   link_title,
-                                  editorial.problem_id)))
+                                  editorial.problem_id),
+                   _class="left-align-problem"))
+
+        tr.append(TD(IMG(_src=current.get_static_url("images/" + \
+                                                     urltosite(record["link"]) + \
+                                                     "_small.png"),
+                         _style="height: 30px; width: 30px;")))
 
         if logged_in_user_id is not None and \
            (editorial.user_id == logged_in_user_id or

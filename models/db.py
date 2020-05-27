@@ -80,8 +80,9 @@ response.form_label_separator = myconf.take('forms.separator')
 #########################################################################
 
 from gluon.tools import Auth, Service, PluginManager
-from datetime import datetime, timedelta
+import datetime
 import utilities
+from stopstalk_constants import *
 
 auth = Auth(db)
 service = Service()
@@ -98,7 +99,7 @@ country_name_list.sort()
 # http://www.web2py.com/books/default/chapter/29/04#Translating-variables
 T.is_writable = False
 
-initial_date = datetime.strptime(current.INITIAL_DATE, "%Y-%m-%d %H:%M:%S")
+initial_date = datetime.datetime.strptime(current.INITIAL_DATE, "%Y-%m-%d %H:%M:%S")
 
 db.define_table("institutes", Field("name", label=T("Name")))
 
@@ -204,8 +205,18 @@ bulkmail.settings.sender = "Team StopStalk <" + current.bulk_sender_mail + ">"
 bulkmail.settings.login = current.bulk_sender_user + ":" + current.bulk_sender_password
 
 from redis import Redis
+from influxdb import InfluxDBClient
+
 # REDIS CLIENT
 current.REDIS_CLIENT = Redis(host=current.redis_server, port=current.redis_port, db=0)
+
+# INFLUX CLIENT
+current.INFLUXDB_CLIENT = InfluxDBClient(current.influxdb_server,
+                                         current.influxdb_port,
+                                         current.influxdb_user,
+                                         current.influxdb_password,
+                                         INFLUX_DBNAME)
+
 
 # -----------------------------------------------------------------------------
 def send_mail(to, subject, message, mail_type, bulk=False):
@@ -275,7 +286,9 @@ def validate_email(email):
         """
         domain = email.split("@")[-1]
         try:
-            response = requests.get("http://" + domain, timeout=3)
+            response = requests.get("http://" + domain,
+                                    headers={"User-Agent": COMMON_USER_AGENT},
+                                    timeout=3)
             return (response.status_code == 200)
         except:
             return False
@@ -367,11 +380,11 @@ def sanitize_fields(form):
     # 3.
     for site in handle_fields:
         site_handle = site + "_handle"
-        if site == "hackerrank" or site == "uva" or site == "stopstalk":
+        if site in ["hackerrank", "uva", "stopstalk", "atcoder"]:
             continue
         if form.vars[site_handle] and \
            form.vars[site_handle] != form.vars[site_handle].lower():
-            form.errors[site_handle] = T("Please enter in lower case")
+            form.vars[site_handle] = form.vars[site_handle].lower()
 
     # 4.
     if form.vars.institute == "":
@@ -476,8 +489,7 @@ Referrer: %s\n""" % (form.vars.first_name,
 
 auth.settings.register_onvalidation = [sanitize_fields]
 auth.settings.register_onaccept.append(register_callback)
-auth.settings.verify_email_onaccept.extend([notify_institute_users,
-                                            create_next_retrieval_record,
+auth.settings.verify_email_onaccept.extend([create_next_retrieval_record,
                                             append_user_to_refreshed_users])
 current.auth = auth
 current.response.formstyle = utilities.materialize_form
@@ -590,6 +602,7 @@ db.define_table("problem",
                 Field("total_submissions", "integer", default=0),
                 Field("user_ids", "text", default=""),
                 Field("custom_user_ids", "text", default=""),
+                Field("difficulty", "float"),
                 Field.Virtual("user_count", _count_users_lambda),
                 Field.Virtual("custom_user_count", _count_custom_users_lambda),
                 format="%(name)s %(id)s")
@@ -757,6 +770,15 @@ db.define_table("problem_difficulty",
                 Field("problem_id", "reference problem"),
                 Field("score", "integer", default=0))
 
+db.define_table("problem_setters",
+                Field("problem_id", "reference problem"),
+                Field("handle"))
+
+db.define_table("atcoder_problems",
+                Field("problem_identifier"),
+                Field("contest_id"),
+                Field("name"))
+
 uvadb.define_table("problem",
                    Field("problem_id", "integer"),
                    Field("problem_num", "integer"),
@@ -785,6 +807,24 @@ current.WEIGHTING_FACTORS = {
 current.REFRESH_INTERVAL = 120 * 60
 
 # ----------------------------------------------------------------------------
+def get_static_file_version(file_path):
+    if current.environment == "production":
+        new_file_path = file_path
+        static_dir = "static/minified_files"
+        if file_path[-3:] == ".js":
+            new_file_path = file_path[:-3] + ".min.js"
+        elif file_path[-4:] == ".css":
+            new_file_path = file_path[:-4] + ".min.css"
+        else:
+            static_dir = "static"
+            new_file_path = file_path
+    else:
+        new_file_path = file_path
+        static_dir = "static"
+
+    return static_dir, new_file_path, current.REDIS_CLIENT.get(new_file_path)
+
+# ----------------------------------------------------------------------------
 def get_static_url(file_path):
     """
         Get the link to the minified static file with versioning
@@ -794,25 +834,17 @@ def get_static_url(file_path):
     """
 
     if current.environment == "production":
-        new_file_path = file_path
-        if file_path[-3:] == ".js":
-            new_file_path = file_path[:-3] + ".min.js"
-        elif file_path[-4:] == ".css":
-            new_file_path = file_path[:-4] + ".min.css"
-        else:
-            return URL("static",
-                       file_path,
-                       vars={"_rev": current.REDIS_CLIENT.get(file_path)},
-                       extension=False)
-        return URL("static/minified_files",
-                   new_file_path,
-                   vars={"_rev": current.REDIS_CLIENT.get(new_file_path)},
+        static_dir, file_path, revision = get_static_file_version(file_path)
+        return URL(static_dir,
+                   file_path,
+                   vars={"_rev": revision},
                    extension=False)
     else:
         return URL("static",
                    file_path,
                    extension=False)
 
+current.get_static_file_version = get_static_file_version
 current.get_static_url = get_static_url
 
 # =============================================================================

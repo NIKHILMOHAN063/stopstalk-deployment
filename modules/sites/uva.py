@@ -40,7 +40,16 @@ class Profile(object):
 
     # -------------------------------------------------------------------------
     @staticmethod
+    def is_valid_url(url):
+        return url.__contains__("uva.onlinejudge.org") or \
+               url.__contains__("uhunt.felix-halim.net")
+
+    # -------------------------------------------------------------------------
+    @staticmethod
     def is_website_down():
+        """
+            @return (Boolean): If the website is down
+        """
         return (Profile.site_name in current.REDIS_CLIENT.smembers("disabled_retrieval"))
 
     # -------------------------------------------------------------------------

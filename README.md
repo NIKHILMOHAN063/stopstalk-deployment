@@ -152,7 +152,9 @@ cp /opt/redis-stable/redis.conf /etc/redis/
 
 8. Install Redis - [here](https://www.digitalocean.com/community/tutorials/how-to-install-and-configure-redis-on-ubuntu-16-04)
 
-9. Navigate back to the web2py folder and start the web2py server.
+9. Install InfluxDB (1.7) - [here](https://docs.influxdata.com/influxdb/v1.7/introduction/installation/)
+
+10. Navigate back to the web2py folder and start the web2py server.
 
     ```
     cd /opt/web2py
@@ -164,16 +166,16 @@ cp /opt/redis-stable/redis.conf /etc/redis/
     python web2py.py -a PASSWORD // Choose any password
     ```
 
-10. Open the browser and go to the URL -
+11. Open the browser and go to the URL -
 
     `http://localhost:8000/stopstalk/`
 
   **Note:**
   * The database will be completely empty after installation
 
-11. Done. :smile:
+12. Done. :smile:
 
-12. To setup syntax check before all of your commits, just create a file in applications/stopstalk/.git/hooks/pre-commit with just `make` as it's content.
+13. To setup syntax check before all of your commits, just create a file in applications/stopstalk/.git/hooks/pre-commit with just `make syntaxx_check` as it's content.
  
 A few steps to setup your local database - [StopStalk Wiki](https://github.com/stopstalk/stopstalk-deployment/wiki/Setup-basic-database-tables-locally)
 

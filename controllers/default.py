@@ -27,7 +27,9 @@ import requests
 import utilities
 import json
 
-user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.139 Safari/537.36"
+# ------------------------------------------------------------------------------
+def status_check():
+    return "up and running..."
 
 # ----------------------------------------------------------------------------
 def handle_error():
@@ -141,20 +143,70 @@ def handle_error():
     return dict(error_message=error_message, similar_users=similar_users)
 
 # ----------------------------------------------------------------------------
+@auth.requires_login()
+def get_card_html():
+    init_arguments = request.vars["init_arguments[]"]
+
+    if not isinstance(init_arguments, list):
+        init_arguments = [init_arguments]
+
+    if int(init_arguments[0]) != session.user_id:
+        return ""
+
+    import dashboard_cards
+    card_class = getattr(dashboard_cards,
+                         request.vars["class_name"])(*init_arguments)
+
+    return card_class.get_html() if card_class.should_show() else ""
+
+# ----------------------------------------------------------------------------
+@auth.requires_login()
+def dashboard():
+    session.welcome_shown = True
+    ratable = db.recent_announcements
+    rarecord = db(ratable.user_id == session.user_id).select().first()
+    if rarecord is None:
+        ratable.insert(user_id=session.user_id)
+        rarecord = db(ratable.user_id == session.user_id).select().first()
+
+    user = session.auth.user
+    db.sessions_today.insert(message="%s %s %d %s" % (user.first_name,
+                                                      user.last_name,
+                                                      user.id,
+                                                      datetime.datetime.now()))
+
+    return dict(recent_announcements=json.loads(rarecord.data))
+
+# ----------------------------------------------------------------------------
+@auth.requires_login()
+def cta_handler():
+    problem_id = utilities.pick_a_problem(
+                    session.user_id,
+                    False,
+                    **request.vars
+                )
+    redirect(URL("problems", "index", vars=dict(problem_id=problem_id)))
+
+# ----------------------------------------------------------------------------
 def user_editorials():
 
     uetable = db.user_editorials
     atable = db.auth_user
     ptable = db.problem
 
-    # Get all the problems which do not have an official editorial
-    query = (ptable.editorial_link == None) | (ptable.editorial_link == "")
-    pids = db(query).select(ptable.id)
-    pids = [x.id for x in pids]
-
     pending_count = 0
     accepted_problem_ids = set([])
-    rows = db(uetable).select(orderby=~uetable.id)
+    start_time = time.time()
+    rows = db(uetable.problem_id == ptable.id).select(
+                uetable.user_id,
+                uetable.problem_id,
+                uetable.verification,
+                uetable.votes,
+                uetable.added_on,
+                uetable.id,
+                ptable.editorial_link,
+                orderby=~uetable.id
+           )
 
     # Rows to show on the leaderboard
     table_rows = []
@@ -162,31 +214,40 @@ def user_editorials():
     # To handle multiple accepted editorials of same user on same problem
     user_id_pid_map = {}
 
-    # To store the user objects who have atleast one accepted editorial
-    user_object_map = {}
+    user_objs = utilities.get_user_records(
+                    set([x.user_editorials.user_id for x in rows]),
+                    "id",
+                    "id",
+                    False
+                )
 
     for row in rows:
 
-        if row.verification != "accepted":
-            if row.verification == "pending":
+        if row.user_editorials.verification != "accepted":
+            if row.user_editorials.verification == "pending":
                 pending_count += 1
             continue
         else:
-            accepted_problem_ids.add(row.problem_id)
+            accepted_problem_ids.add(row.user_editorials.problem_id)
 
-        if user_object_map.has_key(row.user_id) is False:
-            # Store the user object for later usage
-            user_object_map[row.user_id] = atable(row.user_id)
-
-        if row.problem_id not in pids:
+        if row.problem.editorial_link not in ("", None):
             # This problem has an official editorial - don't count in leaderboard
             continue
 
-        if user_id_pid_map.has_key((row.user_id, row.problem_id)):
+        if user_id_pid_map.has_key((row.user_editorials.user_id, row.user_editorials.problem_id)):
             # This is to handle multiple accepted editorials of same user on same problem
             continue
 
-        user_id_pid_map[(row.user_id, row.problem_id)] = row
+        user_id_pid_map[(row.user_editorials.user_id, row.user_editorials.problem_id)] = row.user_editorials
+
+    # Get recent editorials table
+    # ----------------------------
+    table = utilities.render_user_editorials_table(
+                [x.user_editorials for x in rows][:300],
+                session.user_id,
+                session.user_id,
+                "read-editorial-user-editorials-page"
+            )
 
     # The dictionary to store the count mapping of editorials
     editorial_count_dict = {}
@@ -202,30 +263,13 @@ def user_editorials():
                                                    "votes": vote_count}
 
     for key in editorial_count_dict:
-        user_obj = atable(key)
+        user_obj = user_objs[key]
         table_rows.append([editorial_count_dict[key]["count"],
                            editorial_count_dict[key]["votes"],
                            user_obj.stopstalk_handle,
                            user_obj.first_name + " " + user_obj.last_name])
 
     table_rows = sorted(table_rows, key=lambda x: (x[0], x[1]), reverse=True)
-
-    # Get recent editorials table
-    # ----------------------------
-
-    table = TABLE(_class="centered")
-    thead = THEAD(TR(TH(T("Problem")),
-                     TH(T("Editorial By")),
-                     TH(T("Added on")),
-                     TH(T("Votes")),
-                     TH()))
-    tbody = TBODY()
-
-    user_id = session.user_id if auth.is_logged_in() else None
-    table = utilities.render_user_editorials_table(rows[:300],
-                                                   user_id,
-                                                   user_id,
-                                                   "read-editorial-user-editorials-page")
 
     return dict(table_rows=table_rows[:10],
                 recent_editorials_table=table,
@@ -243,7 +287,7 @@ def user_wise_editorials():
         redirect(URL("default", "user_editorials"))
         return
     else:
-        row = db(atable.stopstalk_handle == request.args[0]).select().first()
+        row = utilities.get_user_records([request.args[0]], "stopstalk_handle", "stopstalk_handle", True)
         if row is None:
             session.flash = "Invalid StopStalk Handle"
             redirect(URL("default", "user_editorials"))
@@ -281,7 +325,7 @@ def index():
             session.flash = T("Welcome StopStalker!!")
         elif response.flash is not None:
             session.flash = response.flash
-        redirect(URL("default", "submissions", args=[1]))
+        redirect(URL("default", "dashboard"))
 
     return dict()
 
@@ -331,7 +375,7 @@ def todo():
                         TD(IMG(_src=get_static_url("images/" + \
                                                    utilities.urltosite(row.link) + \
                                                    "_small.png"),
-                               _style="height: 30px; weight: 30px;")),
+                               _class="parent-site-icon-small")),
                         TD(row.total_submissions),
                         TD(len(uids) + len(cuids)),
                         TD(I(_class="red-text text-accent-4 fa fa-times remove-from-todo",
@@ -448,6 +492,7 @@ def job_profile():
     else:
         rdtable.insert(**update_params)
         resume_data_record = db(rdtable.user_id == session.user_id).select().first()
+        current.REDIS_CLIENT.delete(CARD_CACHE_REDIS_KEYS["job_profile_prefix"] + str(session.user_id))
 
     response.flash = "Successfully saved your details!"
     return _get_response_from_record(resume_data_record)
@@ -607,7 +652,7 @@ def get_custom_users():
     atable = db.auth_user
     cftable = db.custom_friend
 
-    row = db(atable.stopstalk_handle == stopstalk_handle).select().first()
+    row = utilities.get_user_records([stopstalk_handle], "stopstalk_handle", "stopstalk_handle", True)
     if row:
         custom_users = db(cftable.user_id == row.id).select()
         table = TABLE(THEAD(TR(TH(T("Name")),
@@ -674,26 +719,10 @@ def contests():
         Show the upcoming contests
     """
 
-    today = datetime.datetime.today()
-    today = datetime.datetime.strptime(str(today)[:-7],
-                                       "%Y-%m-%d %H:%M:%S")
-
-    start_date = today.date()
-    end_date = start_date + datetime.timedelta(90)
-    site_mapping = {"CODECHEF": "CodeChef",
-                    "CODEFORCES": "Codeforces",
-                    "HACKERRANK": "HackerRank",
-                    "HACKEREARTH": "HackerEarth"}
-    url = "https://contesttrackerapi.herokuapp.com/"
-    response = requests.get(url)
-    if response.status_code == 200:
-        response = response.json()["result"]
-    else:
+    ongoing, upcoming = utilities.get_contests()
+    if None in [ongoing, upcoming]:
         return dict(retrieved=False)
 
-    ongoing = response["ongoing"]
-    upcoming = response["upcoming"]
-    contests = []
     cal = pdt.Calendar()
 
     table = TABLE(_class="centered bordered", _id="contests-table")
@@ -709,11 +738,10 @@ def contests():
     button_class = "btn-floating btn-small accent-4 tooltipped"
     view_link_class = button_class + " green view-contest"
     reminder_class = button_class + " orange set-reminder"
-    icon_style = "height: 30px; width: 30px;"
     left_tooltip_attrs = {"position": "left", "delay": "50"}
 
     for i in ongoing:
-        if i["Platform"] not in site_mapping:
+        if i["Platform"] not in CONTESTS_SITE_MAPPING:
             continue
 
         try:
@@ -737,8 +765,8 @@ def contests():
         append(TD(IMG(_src=get_static_url("images/" + \
                                           str(i["Platform"]).lower() + \
                                           "_small.png"),
-                      _title=site_mapping[i["Platform"]],
-                      _style=icon_style)))
+                      _title=CONTESTS_SITE_MAPPING[i["Platform"]],
+                      _class="parent-site-icon-small")))
 
         append(TD("-"))
         append(TD(str(endtime).replace("-", "/"),
@@ -757,7 +785,7 @@ def contests():
 
     for i in upcoming:
 
-        if i["Platform"] not in site_mapping:
+        if i["Platform"] not in CONTESTS_SITE_MAPPING:
             continue
 
         start_time = datetime.datetime.strptime(i["StartTime"],
@@ -768,8 +796,8 @@ def contests():
         append(TD(IMG(_src=get_static_url("images/" + \
                                           str(i["Platform"]).lower() + \
                                           "_small.png"),
-                      _title=site_mapping[i["Platform"]],
-                      _style=icon_style)))
+                      _title=CONTESTS_SITE_MAPPING[i["Platform"]],
+                      _class="parent-site-icon-small")))
 
         append(TD(str(start_time), _class="stopstalk-timestamp"))
 
@@ -793,12 +821,15 @@ def contests():
     return dict(table=table, upcoming=upcoming, retrieved=True)
 
 # ------------------------------------------------------------------------------
-def updates():
-  """
-      Show the updates and feature additions
-  """
+def privacy_policy():
+    return dict()
 
-  return dict()
+# ------------------------------------------------------------------------------
+def updates():
+    """
+        Show the updates and feature additions
+    """
+    return dict()
 
 # ------------------------------------------------------------------------------
 def leaderboard():
@@ -843,6 +874,9 @@ def leaderboard():
     # Do not display unverified users in the leaderboard
     aquery &= (atable.registration_key == "")
 
+    # Do not display blacklisted users in the leaderboard
+    aquery &= (atable.blacklisted == False)
+
     if request.vars.has_key("q") and request.vars["q"]:
         from urllib import unquote
         institute = unquote(request.vars["q"])
@@ -873,7 +907,7 @@ def leaderboard():
     if global_leaderboard == True and \
        specific_institute == False and \
        specific_country == False:
-        user_ratings = current.REDIS_CLIENT.get("global_leaderboard_cache")
+        user_ratings = current.REDIS_CLIENT.get(GLOBAL_LEADERBOARD_CACHE_KEY)
         if user_ratings:
             users = json.loads(user_ratings)
             logged_in_row = None
@@ -903,16 +937,12 @@ def leaderboard():
         if user.id in custom_friends_count:
             cf_count = custom_friends_count[user.id]
 
-        country_details = None
-        if user.country in current.all_countries:
-            country_details = [current.all_countries[user.country], user.country]
-
         this_row = (user.first_name + " " + user.last_name,
                     user.stopstalk_handle,
                     user.institute,
                     user.stopstalk_rating,
                     float(user.per_day_change),
-                    country_details,
+                    utilities.get_country_details(user.country),
                     cf_count,
                     leaderboard_rank)
 
@@ -925,7 +955,7 @@ def leaderboard():
     if global_leaderboard == True and \
        specific_institute == False and \
        specific_country == False:
-        current.REDIS_CLIENT.set("global_leaderboard_cache",
+        current.REDIS_CLIENT.set(GLOBAL_LEADERBOARD_CACHE_KEY,
                                  json.dumps(users),
                                  ex=1 * 60 * 60)
 
@@ -964,18 +994,13 @@ def filters():
         redirect(URL("default", "index"))
         return
 
-    if current.REDIS_CLIENT.get("languages_updated_on") is None or \
-       (datetime.datetime.now() - \
-        datetime.datetime.strptime(current.REDIS_CLIENT.get("languages_updated_on"),
-                                   "%Y-%m-%d %H:%M:%S")).days > 0: # Smart ;)
+    if current.REDIS_CLIENT.scard("all_submission_languages") == 0:
         languages = db(stable).select(stable.lang, distinct=True)
         languages = [x.lang for x in languages]
-        submission_languages = ",,".join(languages)
-        current.REDIS_CLIENT.set("languages_updated_on",
-                                 str(datetime.datetime.now())[:-7])
-        current.REDIS_CLIENT.set("submission_languages", submission_languages)
+        for language in languages:
+            utilities.add_language_to_cache(language)
     else:
-        languages = current.REDIS_CLIENT.get("submission_languages").split(",,")
+        languages = current.REDIS_CLIENT.smembers("all_submission_languages")
 
     table = None
     global_submissions = False
@@ -1226,6 +1251,7 @@ def mark_friend():
     # Insert a tuple of users' id into the following table
     ftable.insert(user_id=friend_id, follower_id=session.user_id)
 
+    current.REDIS_CLIENT.delete(CARD_CACHE_REDIS_KEYS["add_more_friends_prefix"] + str(session.user_id))
     trtable = db.todays_requests
     query = (trtable.user_id == friend_id) & \
             (trtable.follower_id == session.user_id)
@@ -1359,6 +1385,9 @@ def search():
              (atable.last_name.contains(q)) | \
              (atable.stopstalk_handle.contains(q)))
 
+    if utilities.is_stopstalk_admin(session.user_id):
+        query |= (atable.email.contains(q))
+
     # Search by profile site handle
     for site in current.SITES:
         field_name = site.lower() + "_handle"
@@ -1422,13 +1451,24 @@ def search():
 
     for user in rows:
 
+        authorized_span = ""
+        if utilities.is_stopstalk_admin(session.user_id):
+            authorized_span = SPAN(A(I(_class="fa fa-pencil"),
+                                     _href=URL("appadmin",
+                                               "update",
+                                               args=["db", "auth_user", user.id],
+                                               extension=False),
+                                     _style="color: black;"))
+
         tr = TR()
         tr.append(TD(A(user.first_name + " " + user.last_name,
                        _href=URL("user", "profile",
                                  args=[user.stopstalk_handle],
                                  extension=False),
                        _class="search-user-name",
-                       _target="_blank")))
+                       _target="_blank"),
+                     " ",
+                     authorized_span))
 
         td = TD()
 
@@ -1483,11 +1523,11 @@ def download_submission():
 
     site = request.get_vars["site"]
     view_link = request.get_vars["viewLink"]
-    if site == "CodeChef":
-        return getattr(sites, "codechef").Profile.download_submission(view_link)
-    elif site == "CodeForces":
-        return getattr(sites, "codeforces").Profile.download_submission(view_link)
-    else:
+
+    try:
+        return getattr(sites,
+                       site.lower()).Profile.download_submission(view_link)
+    except AttributeError:
         return -1
 
 # ----------------------------------------------------------------------------
@@ -1518,6 +1558,7 @@ def unfriend():
             return _invalid_url()
 
         db(query).delete()
+        current.REDIS_CLIENT.delete(CARD_CACHE_REDIS_KEYS["add_more_friends_prefix"] + str(session.user_id))
 
         trtable = db.todays_requests
         query = (trtable.user_id == friend_id) & \
@@ -1553,13 +1594,11 @@ def submissions():
             # The pagination page number is not integer
             raise HTTP(404)
             return
-    session.welcome_shown = True
 
     cftable = db.custom_friend
     stable = db.submission
     atable = db.auth_user
     ptable = db.problem
-    ratable = db.recent_announcements
 
     # Get all the friends/custom friends of the logged-in user
     friends, cusfriends = utilities.get_friends(session.user_id)
@@ -1586,17 +1625,6 @@ def submissions():
         return dict(count=count,
                     total_rows=1)
 
-    rarecord = db(ratable.user_id == session.user_id).select().first()
-    if rarecord is None:
-        ratable.insert(user_id=session.user_id)
-        rarecord = db(ratable.user_id == session.user_id).select().first()
-
-    user = session.auth.user
-    db.sessions_today.insert(message="%s %s %d %s" % (user.first_name,
-                                                      user.last_name,
-                                                      user.id,
-                                                      datetime.datetime.now()))
-
     offset = PER_PAGE * (active - 1)
     # Retrieve only some number of submissions from the offset
     rows = db(query).select(orderby=~db.submission.time_stamp,
@@ -1604,30 +1632,10 @@ def submissions():
 
     table = utilities.render_table(rows, cusfriends, session.user_id)
 
-    country_value = session.auth.user.get("country")
-    country = country_value if country_value else "not-available"
-
-    country_form = None
-    if country == "not-available":
-        country_form = SQLFORM(db.auth_user,
-                               session.auth.user,
-                               fields=["country"],
-                               showid=False)
-        if country_form.process(onvalidation=current.sanitize_fields).accepted:
-            session.auth.user = db.auth_user(session.user_id)
-            session.flash = T("Country updated!")
-            redirect(URL("default", "submissions", args=1))
-        elif country_form.errors:
-            response.flash = T("Form has errors")
-
     return dict(table=table,
                 friends=friends,
                 cusfriends=cusfriends,
-                total_rows=len(rows),
-                country=country,
-                country_form=country_form,
-                utilities=utilities,
-                recent_announcements=json.loads(rarecord.data))
+                total_rows=len(rows))
 
 # ----------------------------------------------------------------------------
 def faq():
@@ -1658,12 +1666,17 @@ def contact_us():
     """
 
     ctable = db.contact_us
-
+    reported_handle = request.vars.get("report_user", None)
     form = SQLFORM(ctable)
-
     if auth.is_logged_in():
         user = session.auth.user
         ctable.email.default = user.email
+        form.vars.name = user.first_name + " " + user.last_name
+        form.vars.email = user.email
+
+    if reported_handle is not None:
+        form.vars.subject = "Report a user"
+        form.vars.text_message = "I would like to report %s because ..." % reported_handle
 
     if form.process().accepted:
         session.flash = T("We will get back to you!")

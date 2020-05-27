@@ -71,7 +71,36 @@ def pie_chart_helper():
                            groupby=stable.status)
     return dict(row=row)
 
-# ----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+def by():
+    if len(request.args) < 1:
+        session.flash = "Invalid URL!"
+        redirect(URL("default", "index"))
+
+    stopstalk_handle = request.args[0]
+
+    atable = db.auth_user
+    pstable = db.problem_setters
+    ptable = db.problem
+
+    return_val = dict(stopstalk_handle=stopstalk_handle,
+                      problems_count=0)
+
+    table = TABLE(_class="bordered centered")
+    thead = THEAD(TR(TH("Problem")))
+
+    problems = utilities.get_problems_authored_by(stopstalk_handle)
+    if len(problems) == 0:
+        return return_val
+
+    return_val["table"] = utilities.get_problems_table(problems,
+                                                       session.user_id,
+                                                       None)
+
+    return_val["problems_count"] = len(problems)
+    return return_val
+
+# ------------------------------------------------------------------------------
 @auth.requires_login()
 def get_tag_values():
     ttable = db.tag
@@ -249,12 +278,15 @@ def index():
 
     stable = db.submission
     ptable = db.problem
+    pstable = db.problem_setters
 
     problem_record = ptable(problem_id)
     if problem_record is None:
         session.flash = T("Please click on a Problem Link")
         redirect(URL("default", "index"))
 
+    setters = db(pstable.problem_id == problem_id).select(pstable.handle)
+    setters = [x.handle for x in setters]
     query = (stable.problem_id == problem_id)
     cusfriends = []
 
@@ -288,7 +320,8 @@ def index():
     except AttributeError:
         all_tags = ["-"]
 
-    site = utilities.urltosite(problem_record.link).capitalize()
+    lower_site = utilities.urltosite(problem_record.link)
+    site = utilities.get_actual_site(lower_site)
     problem_details = DIV(_class="row")
     details_table = TABLE(_style="font-size: 140%; float: left; width: 50%;")
     problem_class = ""
@@ -303,7 +336,8 @@ def index():
                                                 link_class,
                                                 link_title,
                                                 problem_id,
-                                                anchor=False),
+                                                anchor=False,
+                                                disable_todo=True),
                        _id="problem_name")))
     tbody.append(TR(TD(),
                     TD(STRONG(T("Site") + ":")),
@@ -359,6 +393,12 @@ def index():
                                   _id=suggest_tags_id,
                                   data=suggest_tags_data)))))
 
+    if len(setters) > 0:
+        tbody.append(TR(TD(),
+                        TD(STRONG(T("Problem setters") + ":")),
+                        TD(DIV(utilities.problem_setters_widget(setters,
+                                                                site)))))
+
     details_table.append(tbody)
     problem_details.append(details_table)
     problem_details.append(DIV(_style="width: 50%; height: 200px; margin-top: 3%",
@@ -391,7 +431,13 @@ def editorials():
     atable = db.auth_user
     query = (uetable.problem_id == record.id)
     user_editorials = db(query).select(orderby=~uetable.added_on)
-    accepted_count = len(filter(lambda x: (x.verification == "accepted" or (auth.is_logged_in() and (x.user_id == session.user_id or session.user_id == 1))), user_editorials))
+    accepted_count = len(filter(lambda x: (x.verification == "accepted" or \
+                                           (auth.is_logged_in() and \
+                                            (x.user_id == session.user_id or \
+                                             session.user_id in STOPSTALK_ADMIN_USER_IDS)
+                                             )
+                                            ),
+                                user_editorials))
     if accepted_count == 0:
         if auth.is_logged_in():
             table_contents = T("No editorials found! Please contribute to the community by writing an editorial if you've solved the problem.")
@@ -460,7 +506,7 @@ def read_editorial():
     if ue_record is None:
         session.flash = "Invalid editorial URL"
         redirect(URL("default", "index"))
-    elif auth.is_logged_in() and session.user_id == 1:
+    elif auth.is_logged_in() and session.user_id in STOPSTALK_ADMIN_USER_IDS:
         # Admin user
         pass
     elif auth.is_logged_in() and session.user_id != ue_record.user_id and ue_record.verification != "accepted":
@@ -663,16 +709,6 @@ def search():
         Search page for problems
     """
 
-    table = TABLE(_class="bordered centered")
-    thead = THEAD(TR(TH(T("Problem Name")),
-                     TH(T("Problem URL")),
-                     TH(T("Site")),
-                     TH(T("Accuracy")),
-                     TH(T("Users solved")),
-                     TH(T("Editorial")),
-                     TH(T("Tags"))))
-    table.append(thead)
-
     ttable = db.tag
     uetable = db.user_editorials
 
@@ -681,6 +717,8 @@ def search():
     clubbed_tags = request.vars.get("generalized_tags", None)
     q = request.vars.get("q", None)
     sites = request.vars.get("site", None)
+    include_editorials = request.vars.get("include_editorials", "")
+    exclude_solved = request.vars.get("exclude_solved", None)
 
     generalized_tags = db(ttable).select(ttable.value, orderby=ttable.value)
     generalized_tags = [x.value for x in generalized_tags]
@@ -693,8 +731,6 @@ def search():
                 # No filter is applied
                 response.flash = "No filter is applied"
             return dict(table=DIV(), generalized_tags=generalized_tags)
-
-    include_editorials = request.vars.get("include_editorials", "")
 
     clubbed_tags = None if clubbed_tags == "" else clubbed_tags
 
@@ -755,6 +791,12 @@ def search():
                    (ptable.editorial_link != "")) | \
                   (ptable.id.belongs(problem_with_user_editorials)))
 
+    if exclude_solved and auth.is_logged_in():
+        solved_pids, _ = utilities.get_solved_problems(session.user_id, False)
+        query &= ~ptable.id.belongs(solved_pids)
+    elif exclude_solved and request.extension == "html":
+        response.flash = T("Login to apply this filter")
+
     site_query = None
     for site in sites:
         if site_query is not None:
@@ -799,62 +841,15 @@ def search():
         # No need of caching here
         all_problems = db(query).select(**kwargs)
 
-    tbody = TBODY()
-    for problem in all_problems:
-        tr = TR()
-
-        link_class, link_title = utilities.get_link_class(problem["id"], session.user_id)
-
-        tr.append(TD(utilities.problem_widget(problem["name"],
-                                              problem["link"],
-                                              link_class,
-                                              link_title,
-                                              problem["id"])))
-        tr.append(TD(A(I(_class="fa fa-link"),
-                       _href=problem["link"],
-                       _class="tag-problem-link",
-                       _target="_blank")))
-        tr.append(TD(IMG(_src=get_static_url("images/" + \
-                                             utilities.urltosite(problem["link"]) + \
-                                             "_small.png"),
-                         _style="height: 30px; width: 30px;")))
-        tr.append(TD("%.2f" % (problem["solved_submissions"]  * 100.0 / \
-                               problem["total_submissions"])))
-        tr.append(TD(problem["user_count"] + problem["custom_user_count"]))
-
-        if problem["id"] in problem_with_user_editorials or \
-           problem["editorial_link"] not in ("", None):
-            tr.append(TD(A(I(_class="fa fa-book"),
-                           _href=URL("problems",
-                                     "editorials",
-                                     args=problem["id"]),
-                           _target="_blank",
-                           _class="problem-search-editorial-link")))
-        else:
-            tr.append(TD())
-
-        td = TD()
-        all_tags = eval(problem["tags"])
-        for tag in all_tags:
-            td.append(DIV(A(tag,
-                            _href=URL("problems",
-                                      "tag",
-                                      vars={"q": tag.encode("utf8"), "page": 1}),
-                            _class="tags-chip",
-                            _style="color: white;",
-                            _target="_blank"),
-                          _class="chip"))
-            td.append(" ")
-        tr.append(td)
-        tbody.append(tr)
-
-    table.append(tbody)
-
-    return dict(table=table, generalized_tags=generalized_tags)
+    return dict(table=utilities.get_problems_table(all_problems,
+                                                   session.user_id,
+                                                   problem_with_user_editorials),
+                generalized_tags=generalized_tags)
 
 # ----------------------------------------------------------------------------
 @auth.requires_login()
 def friends_trending():
+    import trending_utilities
     friends, cusfriends = utilities.get_friends(session.user_id)
 
     # The Original IDs of duplicate custom_friends
@@ -867,42 +862,20 @@ def friends_trending():
 
     friends, custom_friends = set(friends), set(custom_friends)
     stable = db.submission
-    today = datetime.datetime.today()
-    # Consider submissions only after PAST_DAYS(customizable)
-    # for trending problems
-    start_date = str(today - datetime.timedelta(days=current.PAST_DAYS))
-    query = (stable.time_stamp >= start_date) & \
-            (stable.user_id.belongs(friends) | \
+    query = (stable.user_id.belongs(friends) | \
              stable.custom_user_id.belongs(custom_friends))
-    last_submissions = db(query).select(stable.problem_id,
-                                        stable.user_id,
-                                        stable.custom_user_id)
+    last_submissions = trending_utilities.get_last_submissions_for_trending(query)
 
-    return utilities.compute_trending_table(last_submissions,
-                                            "friends",
-                                            session.user_id)
+    return trending_utilities.compute_trending_table(last_submissions,
+                                                     "friends",
+                                                     session.user_id)
 
 # ----------------------------------------------------------------------------
 def global_trending():
-    trending_table = current.REDIS_CLIENT.get("global_trending_table_cache")
-    if trending_table:
-        return trending_table
-
-    stable = db.submission
-    today = datetime.datetime.today()
-    # Consider submissions only after PAST_DAYS(customizable)
-    # for trending problems
-    start_date = str(today - datetime.timedelta(days=current.PAST_DAYS))
-    query = (stable.time_stamp >= start_date)
-    last_submissions = db(query).select(stable.problem_id,
-                                        stable.user_id,
-                                        stable.custom_user_id)
-    trending_table = utilities.compute_trending_table(last_submissions,
-                                                      "global")
-    current.REDIS_CLIENT.set("global_trending_table_cache",
-                             trending_table,
-                             ex=60 * 60)
-    return trending_table
+    from trending_utilities import draw_trending_table
+    trending_problems = current.REDIS_CLIENT.get(GLOBALLY_TRENDING_PROBLEMS_CACHE_KEY)
+    trending_problems = eval(trending_problems)
+    return draw_trending_table(trending_problems, "global", session.user_id)
 
 # ----------------------------------------------------------------------------
 def trending():
@@ -914,7 +887,7 @@ def trending():
         # Show table with trending problems amongst friends
         div = DIV(DIV("",
                       _id="friends-trending-table",
-                      _class="col offset-s1 s4 z-depth-2",
+                      _class="col offset-s1 s4 z-depth-2 trendings-html-table",
                       _style="padding: 200px;"),
                   DIV("",
                       _id="global-trending-table",
@@ -925,7 +898,7 @@ def trending():
         # Show table with globally trending problems
         div = DIV(DIV("",
                       _id="global-trending-table",
-                      _class="col offset-s3 s6 z-depth-2",
+                      _class="col offset-s3 s6 z-depth-2 trendings-html-table",
                       _style="padding: 200px;"),
                   _class="row center")
 

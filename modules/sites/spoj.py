@@ -42,32 +42,58 @@ class Profile(object):
 
     # -------------------------------------------------------------------------
     @staticmethod
+    def is_valid_url(url):
+        return url.__contains__("spoj.com/") or url == current.spoj_lambda_url
+
+    # -------------------------------------------------------------------------
+    @staticmethod
     def is_website_down():
+        """
+            @return (Boolean): If the website is down
+        """
         return (Profile.site_name in current.REDIS_CLIENT.smembers("disabled_retrieval"))
 
     # -------------------------------------------------------------------------
     @staticmethod
-    def get_tags(problem_link):
+    def get_problem_setters(soup, problem_link):
         """
-            Get the tags of a particular problem from its URL
+            @param soup(BeautifulSoup): BeautifulSoup object of problem page
+            @param problem_link(String): Problem link
 
-            @param problem_link (String): Problem URL
-            @return (List): List of tags for that problem
+            @return (List/None): Problem authors or None
         """
+        try:
+            author = soup.find("table",
+                               id="problem-meta").find_all("a")[0]["href"].replace("/users/", "")
+        except:
+            print "Error occurred while getting problem setters", problem_link
+            return None
 
-        # Temporary hack - spoj seems to have removed their SSL cert
-        problem_link = problem_link.replace("https", "http")
-        response = get_request(problem_link)
-        if response in REQUEST_FAILURES:
-            return ["-"]
+        return None if author is None else [author]
 
-        tags = BeautifulSoup(response.text, "lxml").find_all("div",
-                                                             id="problem-tags")
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def get_editorial_link():
+        """
+            No editorials for spoj
+        """
+        return None
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def get_tags(soup):
+        """
+            @param soup(BeautifulSoup): BeautifulSoup object of problem page
+
+            @return (List): List of tags
+        """
+        all_tags = []
+        tags = soup.find_all("div",
+                             id="problem-tags")
         try:
             tags = tags[0].findAll("span")
         except IndexError:
-            return ["-"]
-        all_tags = []
+            return []
 
         for tag in tags:
             tmp = tag.contents
@@ -75,6 +101,34 @@ class Profile(object):
                 all_tags.append(tmp[0][1:])
 
         return all_tags
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def get_problem_details(**args):
+        """
+            Get problem_details given a problem link
+
+            @param args (Dict): Dict containing problem_link
+            @return (Dict): Details of the problem returned in a dictionary
+        """
+
+        editorial_link = Profile.get_editorial_link()
+        all_tags = []
+        problem_setters = None
+
+        # Temporary hack - spoj seems to have removed their SSL cert
+        problem_link = args["problem_link"].replace("https", "http")
+        response = get_request(problem_link)
+        if response in REQUEST_FAILURES:
+            return dict(tags=all_tags,
+                        editorial_link=editorial_link,
+                        problem_setters=problem_setters)
+
+        soup = BeautifulSoup(response.text, "lxml")
+        return dict(tags=Profile.get_tags(soup),
+                    editorial_link=editorial_link,
+                    problem_setters=Profile.get_problem_setters(soup,
+                                                                problem_link))
 
     # -------------------------------------------------------------------------
     @staticmethod

@@ -130,17 +130,10 @@ var initTooltips = function() {
         $("#problem-difficulty-modal-form").attr("data-problem", response["problem_id"]);
     };
 
-    var openProblemDifficultyModal = function(explicitClick, problemId) {
+    var getNextProblem = function(explicitClick, problemId) {
         explicitClick = explicitClick || false;
         problemId = problemId || null;
 
-        var cacheValue = localStorage.getItem("lastShowedProblemDifficulty");
-        if (!isLoggedIn ||
-            (cacheValue &&
-             (Date.now() - cacheValue < 48 * 60 * 60 * 1000) && !explicitClick)) {
-            // Modal showed less than 48 hours before;
-            return;
-        }
         if(explicitClick) $('#problem-difficulty-modal-form').trigger('reset');
 
         $.ajax({
@@ -164,11 +157,22 @@ var initTooltips = function() {
                 console.log("Failed to get the next problem", e);
             }
         });
+    };
 
+    var openProblemDifficultyModal = function(explicitClick, problemId) {
+        var cacheValue = localStorage.getItem("lastShowedProblemDifficulty");
+        if (!isLoggedIn ||
+            (cacheValue &&
+             (Date.now() - cacheValue < 72 * 60 * 60 * 1000) && !explicitClick)) {
+            // Modal showed less than 72 hours before;
+            return;
+        }
+
+        getNextProblem(explicitClick, problemId);
     };
 
     var initProblemDifficultySubmitHandler = function() {
-        $('#problem-difficulty-modal-form').on('submit', function(e) {
+        $(document).on("change", "input[type=radio][name=problem_difficulty_value]", function() {
             var $thisForm = $('#problem-difficulty-modal-form'),
                 $thisTitle = $('#problem-difficulty-title'),
                 $thisProblemLink = $("#problem-details-link");
@@ -248,6 +252,10 @@ var initTooltips = function() {
             localStorage.setItem("lastShowedProblemDifficulty", Date.now());
         });
 
+        $(document).on('click', '#skip-this-problem', function() {
+            getNextProblem(true);
+        });
+
         initTooltips();
 
         if(loggedInUserId < thresholdUserId)  openProblemDifficultyModal();
@@ -291,12 +299,19 @@ var initTooltips = function() {
             document.activeElement.blur();
         }
 
-        $(document).on('mouseenter', '.submissions-table tr, .user-editorials-table tr', function() {
+        var todoTrSelectors = ".submissions-table tr," +
+                              ".user-editorials-table tr," +
+                              "#problem-setter-page-table tr," +
+                              "#problem-response tr," +
+                              ".trendings-html-table tr," +
+                              ".todo-list-icon";
+
+        $(document).on('mouseenter', todoTrSelectors, function() {
             var todoIcon = $(this).find('.add-to-todo-list');
-            todoIcon.show();
+            todoIcon.css("display", "inline-flex");
         });
 
-        $(document).on('mouseleave', '.submissions-table tr, .user-editorials-table tr', function() {
+        $(document).on('mouseleave', todoTrSelectors, function() {
             var todoIcon = $(this).find('.add-to-todo-list');
             todoIcon.hide();
         });

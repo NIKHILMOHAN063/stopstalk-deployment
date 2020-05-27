@@ -89,6 +89,8 @@
                 return "hackerrank";
             } else if (url.search("hackerearth.com") !== -1) {
                 return "hackerearth";
+            } else if (url.search("atcoder.jp") !== -1) {
+                return "atcoder";
             } else {
                 $.web2py.flash("Some error occurred");
                 return "";
@@ -361,7 +363,6 @@
 
     // ---------------------------------------------------------------------------------
     function drawPieChart(statuses) {
-        console.log(statuses);
         var numJSON = {'AC': 0,
                        'WA': 0,
                        'TLE': 0,
@@ -464,10 +465,10 @@
             newSpanChildren[0].innerHTML = problemName;
             if (isLoggedIn) {
                 $(newSpanChildren[1]).attr("data-pid", problemId);
-                return "<span class='todo-list-icon'>" +
+                return "<div class='todo-list-icon' style='display: inline-flex;'>" +
                        newSpanChildren[0].outerHTML +
                        newSpanChildren[1].outerHTML +
-                       "</span>";
+                       "</div>";
             } else {
                 return newSpanChildren[0].outerHTML;
             }
@@ -510,15 +511,6 @@
             return tableContent;
         };
 
-        $(document).on('mouseenter', '.todo-list-icon', function() {
-            var todoIcon = $(this).find('.add-to-todo-list');
-            todoIcon.show();
-        });
-
-        $(document).on('mouseleave', '.todo-list-icon', function() {
-            var todoIcon = $(this).find('.add-to-todo-list');
-            todoIcon.hide();
-        });
         $.ajax({
             url: getSolvedUnsolvedURL,
             method: "GET",
@@ -552,11 +544,47 @@
         });
     };
 
+    // ---------------------------------------------------------------------------------
+    var friendListModalHandler = function() {
+        $('#friend-list-modal').modal();
+        var $throbber = $("#view-submission-preloader").clone();
+        $throbber.attr('id', 'friendsListThrobber');
+        $('#friend-list').html($throbber);
+
+        $(document).on('click', '#friend-list-button', function() {
+            var $this = $(this);
+            if (isLoggedIn) {
+                $('#friend-list-modal').modal('open');
+                $.ajax({
+                    url: getFriendListUrl,
+                    method: 'GET',
+                    data: {'user_id': $this.data('user-id')},
+                    success: function(response) {
+                        $('#friend-list').html(response['table']);
+                    },
+                    error: function(err) {
+                        $.web2py.flash('Something went wrong');
+                        $('#friend-list').html("Something went wrong!");
+                    }
+                });
+            } else {
+                $.web2py.flash('Log in to see friend list.');
+            }
+        });
+    };
+
+    var populateProblemsAuthoredCount = function(count) {
+        if(custom === 'True') return;
+        var problemString = count === 1 ? 'problem' : 'problems';
+        $('#problems-authored-count').html(count.toString() + " " + problemString + " authored by " + handle);
+    };
+
     $(document).ready(function() {
 
         if (totalSubmissions !== "0") {
             // Load the Visualization API and the piechart package.
             getStopStalkUserStats().then(function(data) {
+                populateProblemsAuthoredCount(data['problems_authored_count']);
                 populateSolvedCounts(data['solved_counts']);
                 $('#solved-problems').html(data['solved_problems_count']);
                 $('#total-problems').html(data['total_problems_count']);
@@ -570,7 +598,6 @@
                 StopStalk.userStats.status_percentages = data['status_percentages'];
                 google.load('visualization', '1.1', {'packages': ['corechart', 'calendar', 'bar'],
                                                      'callback': drawCharts});
-
             });
         } else {
             $('#user-details').css('margin-left', '32%');
@@ -603,29 +630,7 @@
             }
         });
 
-        $('#friend-list-modal').modal();
-
-        $('#friend-list-button').click(function() {
-            var $this = $(this);
-            if (isLoggedIn) {
-                $.ajax({
-                    url: getFriendListUrl,
-                    method: 'GET',
-                    data: {'user_id': $this.data('user-id')},
-                    success: function(response) {
-                        $('#friend-list').html(response['table']);
-                        $('#friend-list-modal').modal('open');
-                    },
-                    error: function(err) {
-                        $.web2py.flash('Something went wrong');
-                    }
-                }).done(function(response) {
-                    $('.tooltipped').tooltip();
-                })
-            } else {
-                $.web2py.flash('Log in to see friend list.');
-            }
-        });
+        friendListModalHandler();
 
         getSolvedUnsolvedProblems();
 

@@ -43,6 +43,32 @@ def uva_handle():
 
 # ------------------------------------------------------------------------------
 @auth.requires_login()
+def blacklist_user():
+    if session.user_id not in STOPSTALK_ADMIN_USER_IDS:
+        return "Don't be here"
+
+    stopstalk_handle = request.vars.stopstalk_handle
+
+    if stopstalk_handle is None:
+        return "Please pass stopstalk_handle"
+
+    stable = db.submission
+    atable = db.auth_user
+
+    row = db(atable.stopstalk_handle == stopstalk_handle).select().first()
+    if row is None:
+        return "Stopstalk handle not found"
+
+    row.update_record(stopstalk_rating=0,
+                      per_day=0,
+                      per_day_change=0.0,
+                      blacklisted=True)
+
+    srecords = db(stable.user_id == row.id).delete()
+    return "Deleted %d submission records" % srecords
+
+# ------------------------------------------------------------------------------
+@auth.requires_login()
 def friend_requests():
     """
         Just to avoid too many 404s
@@ -176,7 +202,7 @@ def get_graph_data():
 
     data = dict(graphs=graphs)
     current.REDIS_CLIENT.set(redis_cache_key,
-                             json.dumps(data, separators=(",", ":")),
+                             json.dumps(data, separators=JSON_DUMP_SEPARATORS),
                              ex=1 * 60 * 60)
     return data
 
@@ -199,7 +225,12 @@ def update_details():
 
     atable = db.auth_user
     stable = db.submission
-    record = atable(session.user_id)
+    record = utilities.get_user_records([session.user_id], "id", "id", True)
+
+    for field in form_fields:
+        if record[field] is None:
+            continue
+        record[field] = record[field].encode("utf-8")
 
     # Do not allow to modify stopstalk_handle and email
     atable.stopstalk_handle.writable = False
@@ -214,10 +245,8 @@ def update_details():
                    fields=form_fields,
                    showid=False)
 
-    form.vars.email = record.email
-    form.vars.stopstalk_handle = record.stopstalk_handle
-
     if form.process(onvalidation=current.sanitize_fields).accepted:
+        current.REDIS_CLIENT.delete(utilities.get_user_record_cache_key(session.user_id))
         session.flash = T("User details updated")
 
         updated_sites = utilities.handles_updated(record, form)
@@ -258,7 +287,8 @@ def update_details():
             db(submission_query).delete()
 
         session.auth.user = db.auth_user(session.user_id)
-        redirect(URL("default", "submissions", args=[1]))
+        current.REDIS_CLIENT.delete(CARD_CACHE_REDIS_KEYS["more_accounts_prefix"] + str(session.user_id))
+        redirect(URL("default", "index"))
     elif form.errors:
         response.flash = T("Form has errors")
 
@@ -297,15 +327,21 @@ def update_friend():
     for site in current.SITES:
         form_fields.append(site.lower() + "_handle")
 
+    for field in form_fields:
+        if record[field] is None:
+            continue
+        record[field] = unicode(record[field], "utf-8").encode("utf-8")
+
     form = SQLFORM(cftable,
                    record,
                    fields=form_fields,
                    deletable=True,
                    showid=False)
 
-    form.vars.stopstalk_handle = record.stopstalk_handle
+    form.vars.stopstalk_handle = record.stopstalk_handle.replace("cus_", "")
 
     if form.validate(onvalidation=current.sanitize_fields):
+        form.vars.stopstalk_handle = record.stopstalk_handle
         pickle_file_path = "./applications/stopstalk/graph_data/" + \
                            str(record.id) + "_custom.pickle"
         import os
@@ -376,6 +412,7 @@ def update_friend():
             redirect(URL("user", "custom_friend"))
 
     elif form.errors:
+        form.vars.stopstalk_handle = record.stopstalk_handle
         response.flash = T("Form has errors")
 
     return dict(form=form)
@@ -453,7 +490,7 @@ def mark_read():
         rarecord = db(ratable.user_id == session.user_id).select().first()
     data = json.loads(rarecord.data)
     data[request.vars.key] = True
-    rarecord.update_record(data=json.dumps(data, separators=(",", ":")))
+    rarecord.update_record(data=json.dumps(data, separators=JSON_DUMP_SEPARATORS))
     return dict()
 
 # ------------------------------------------------------------------------------
@@ -463,7 +500,7 @@ def handle_details():
     ihtable = db.invalid_handle
     handle = request.vars.handle
 
-    row = db(atable.stopstalk_handle == handle).select().first()
+    row = utilities.get_user_records([handle], "stopstalk_handle", "stopstalk_handle", True)
     if row is None:
         row = db(cftable.stopstalk_handle == handle).select().first()
         if row is None:
@@ -501,7 +538,7 @@ def handle_details():
         if row[smallsite + "_handle"] == "":
             response[smallsite] = "not-provided"
 
-    result = json.dumps(response, separators=(",", ":"))
+    result = json.dumps(response, separators=JSON_DUMP_SEPARATORS)
     current.REDIS_CLIENT.set(redis_cache_key,
                              result,
                              ex=24 * 60 * 60)
@@ -654,36 +691,10 @@ def get_stopstalk_user_stats():
 
     user_id = int(user_id)
     custom = (custom == "True")
-    stopstalk_handle = utilities.get_stopstalk_handle(user_id, custom)
-    redis_cache_key = "profile_page:user_stats_" + stopstalk_handle
 
-    # Check if data is present in REDIS
-    data = current.REDIS_CLIENT.get(redis_cache_key)
-    if data:
-        result = json.loads(data)
-        if not auth.is_logged_in():
-            del result["rating_history"]
-        return result
-
-    stable = db.submission
-
-    query = (stable["custom_user_id" if custom else "user_id"] == user_id)
-    rows = db(query).select(stable.time_stamp,
-                            stable.problem_id,
-                            stable.status,
-                            stable.site,
-                            orderby=stable.time_stamp)
-
-    # Returns rating history, accepted & max streak (day and accepted),
-    result = utilities.get_stopstalk_user_stats(rows.as_list())
-
-    if auth.is_logged_in():
-        current.REDIS_CLIENT.set(redis_cache_key,
-                                 json.dumps(result, separators=(",", ":")),
-                                 ex=1 * 60 * 60)
-    elif "rating_history" in result:
-        del result["rating_history"]
-
+    result = utilities.get_rating_information(user_id,
+                                              custom,
+                                              auth.is_logged_in())
     return result
 
 # ------------------------------------------------------------------------------
@@ -885,8 +896,7 @@ def submissions():
             redirect(URL("default", "index"))
     else:
         handle = request.args[0]
-        query = (atable.stopstalk_handle == handle)
-        row = db(query).select(atable.id, atable.first_name).first()
+        row = utilities.get_user_records([handle], "stopstalk_handle", "stopstalk_handle", True)
         if row is None:
             query = (cftable.stopstalk_handle == handle)
             row = db(query).select().first()
@@ -970,9 +980,7 @@ def custom_friend():
     total_referrals = db(query).count()
 
     # Retrieve the total allowed custom users from auth_user table
-    query = (atable.id == session.user_id)
-    row = db(query).select(atable.referrer,
-                           atable.allowed_cu).first()
+    row = utilities.get_user_records([session.user_id], "id", "id", True)
     default_allowed = row.allowed_cu
     referrer = 0
     # If a valid referral is applied then award 1 extra CU
@@ -1042,7 +1050,7 @@ def custom_friend():
     if form.accepted:
         session.flash = T("Submissions will be added in some time")
         current.create_next_retrieval_record(form.vars, custom=True)
-        redirect(URL("default", "submissions", args=[1]))
+        redirect(URL("default", "dashboard"))
 
     return dict(form=form,
                 table=table,
@@ -1070,8 +1078,10 @@ def get_friend_list():
     table = TABLE(_class="bordered centered")
     tbody = TBODY()
 
+    user_records = utilities.get_user_records(profile_friends, "id", "id", False)
+
     for friend_id in profile_friends:
-        row = atable(friend_id)
+        row = user_records[friend_id]
 
         friend_name = " ".join([row.first_name.capitalize(), row.last_name.capitalize()])
         profile_url = URL("user", "profile",

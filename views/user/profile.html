@@ -58,6 +58,10 @@
             text-align: center;
         }
 
+        #profile-page-accuracy-table td {
+            padding: 5px 5px;
+        }
+
     </style>
 
     <!--Load the AJAX API-->
@@ -100,7 +104,7 @@
             <tr>
                 <td>
                     <div id="user-details" class="center">
-                        <div class="row">
+                        <div class="row" style="margin-bottom: 5px;">
                             <table class="centered">
                                 <tr>
                                     <th style="text-align: center;" colspan="4">
@@ -113,7 +117,18 @@
                                     <th>
                                         <h4>
                                             <span>{{if row.country:}} {{=SPAN(_class="flag-icon flag-icon-" + current.all_countries[row.country].lower(), _title=row.country)}}  &nbsp; {{pass}}</span>
-                                            <strong><b>{{=name}}</b></strong>
+                                            {{if custom == False and row.blacklisted:}}
+                                                <strong class="tooltipped" data-position="bottom" data-delay="50" data-tooltip="Account blacklisted" style="cursor: pointer;"><b><del>{{=name}}</del></b></strong>
+                                            {{else:}}
+                                                <strong>
+                                                    <b>{{=name}}</b>
+                                                    {{if auth.is_logged_in() and session.handle != row.stopstalk_handle:}}
+                                                        <a class="btn btn-floating user-blacklist-button tooltipped" data-position="bottom" data-delay="50" data-tooltip="Report user" href="{{=URL('default', 'contact_us', vars={'report_user': row.stopstalk_handle})}}" target="_blank">
+                                                            <i class="fa fa-flag red-text" style="margin-top: -9px; font-size: 12px;"></i>
+                                                        </a>
+                                                    {{pass}}
+                                                </strong>
+                                            {{pass}}
                                             {{if cf_count:}}
                                                 <button class="custom-user-count-profile-page btn-floating cuser-count-button tooltipped" data-position="right" data-delay="50" data-tooltip="{{=T('Number of custom users')}}" data-stopstalk-handle="{{=row.stopstalk_handle}}">{{=cf_count}}</button>
                                             {{pass}}
@@ -199,29 +214,46 @@
                                 </tr>
                             </table>
                             <span class="light grey-text"><i>{{=T("Last updated")}}: <b>{{=last_updated}}</b></i></span>
+                            {{if custom == False:}}
+                                <br/><span class="light grey-text"><strong><a href="{{=URL('problems', 'by', args=actual_handle)}}" id="problems-authored-count"></a></strong></span>
+                            {{pass}}
                         </div>
                         {{if parent_user:}}
                             <h6>{{=T("Custom User of")}} <a id="profile-custom-user-of" href="{{=URL('user', 'profile', args=parent_user[1])}}">{{=parent_user[0]}}</a></h6>
                         {{pass}}
-                        <div class="row center">
+                        <div class="row center" style="margin-bottom: 2px; padding-top: 5px;">
                             <h6><strong>{{=T("Accuracy")}}</strong></h6>
+                            {{i = 0}}
+                            <table id="profile-page-accuracy-table" class="centered col offset-s1 s10"><tbody>
                             {{for site in current.SITES:}}
-                                {{if profile_urls[site] != "NA":}}
-                                    <a id="{{=site.lower()}}-profile-url" class="tooltipped profile-page-site-profile-url" data-position="bottom" data-delay="30" data-tooltip="{{=site}}" target="_blank" href="{{=profile_urls[site]}}">
-                                        <div class="chip" id="{{=site.lower()}}_chip">
-                                            <img src="{{=get_static_url('images/' + site.lower() + '_logo.png')}}" alt="{{=site}}"/>
-                                            <b id="site-accuracy-{{=site.lower()}}">-</b>
-                                        </div>
-                                    </a>
-                                {{else:}}
-                                    <a id="{{=site.lower()}}-profile-url" href="{{=current.SITES[site]}}" class="tooltipped" data-position="bottom" data-delay="30" data-tooltip="{{=site}}" target="_blank">
-                                        <div class="chip" id="{{=site.lower()}}_chip">
-                                            <img src="{{=get_static_url('images/' + site.lower() + '_logo.png')}}" alt="{{=site}}"/>
-                                            <b id="site-accuracy-{{=site.lower()}}">-</b>
-                                        </div>
-                                    </a>
+                                {{if i % 4 == 0:}}
+                                    <tr style="margin-bottom: 5px;">
                                 {{pass}}
+                                {{if profile_urls[site] != "NA":}}
+                                    <td>
+                                        <a id="{{=site.lower()}}-profile-url" class="tooltipped profile-page-site-profile-url" data-position="bottom" data-delay="30" data-tooltip="{{=site}}" target="_blank" href="{{=profile_urls[site]}}">
+                                            <div class="chip" id="{{=site.lower()}}_chip">
+                                                <img src="{{=get_static_url('images/' + site.lower() + '_logo.png')}}" alt="{{=site}}"/>
+                                                <b id="site-accuracy-{{=site.lower()}}">-</b>
+                                            </div>
+                                        </a>
+                                    </td>
+                                {{else:}}
+                                    <td>
+                                        <a id="{{=site.lower()}}-profile-url" href="{{=current.SITES[site]}}" class="tooltipped" data-position="bottom" data-delay="30" data-tooltip="{{=site}}" target="_blank">
+                                            <div class="chip" id="{{=site.lower()}}_chip">
+                                                <img src="{{=get_static_url('images/' + site.lower() + '_logo.png')}}" alt="{{=site}}"/>
+                                                <b id="site-accuracy-{{=site.lower()}}">-</b>
+                                            </div>
+                                        </a>
+                                    </td>
+                                {{pass}}
+                                {{if (i + 1) % 4 == 0:}}
+                                    </tr>
+                                {{pass}}
+                                {{i += 1}}
                             {{pass}}
+                            </tbody></table>
                         </div>
                         <table class="bordered centered">
                             <thead>
@@ -242,7 +274,6 @@
                                 </tr>
                             </tbody>
                         </table>
-                        <br/>
                         <table class="bordered centered">
                             <thead>
                                 <tr>
@@ -281,6 +312,20 @@
         </table>
       </div>
       <br/>
+      <div>
+          {{if utilities.should_show_stopstalk_ads("profile", actual_handle):}}
+              <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+              <!-- Profile page - before contest rating -->
+              <ins class="adsbygoogle"
+                   style="display:inline-block;width:728px;height:90px"
+                   data-ad-client="ca-pub-5161647280125247"
+                   data-ad-slot="6469761463"></ins>
+              <script>
+                   (adsbygoogle = window.adsbygoogle || []).push({});
+              </script>
+          {{pass}}
+      </div>
+      <br/>
       {{if total_submissions != 0:}}
       <div id="carousel-item-2">
         <h5>Contest Ratings</h5>
@@ -292,13 +337,27 @@
         {{else:}}
             <p>No graph data available at the moment !</p>
         {{pass}}
-        <br/><br/>
+        <br/>
+        <div>
+            {{if utilities.should_show_stopstalk_ads("profile", actual_handle):}}
+                <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+                <!-- Profile page - before rating history -->
+                <ins class="adsbygoogle"
+                     style="display:inline-block;width:728px;height:90px"
+                     data-ad-client="ca-pub-5161647280125247"
+                     data-ad-slot="5249067183"></ins>
+                <script>
+                     (adsbygoogle = window.adsbygoogle || []).push({});
+                </script>
+            {{pass}}
+        </div>
+        <br/>
         <h5>StopStalk Rating History</h5>
         {{if auth.is_logged_in():}}
             <p>Contributions of various aspects to StopStalk Rating</p>
             <div id="stopstalk-rating-graph"></div>
         {{else:}}
-            <p><b>Contributions of various aspects to StopStalk Rating. Please <a href="{{=URL('default', 'user', args='login')}}" target="_blank">Login</a> to view StopStalk Rating graph</b></p>
+            <p><b>Contributions of various aspects to StopStalk Rating. Please <a id="login-to-view-stopstalk-rating-graph" href="{{=URL('default', 'user', args='login')}}" target="_blank">Login</a> to view StopStalk Rating graph</b></p>
             <div id="stopstalk-rating-graph"></div>
                 <img src="{{=URL('static', 'images/blurred_history.png')}}" style="height: 500px; width: 900px;">
             </div>
@@ -319,6 +378,19 @@
             </div>
         </div>
       </div>
+      <div>
+          {{if utilities.should_show_stopstalk_ads("profile", actual_handle):}}
+              <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+              <!-- Profile page - Before Activity header -->
+              <ins class="adsbygoogle"
+                   style="display:inline-block;width:728px;height:90px"
+                   data-ad-client="ca-pub-5161647280125247"
+                   data-ad-slot="3308998237"></ins>
+              <script>
+                   (adsbygoogle = window.adsbygoogle || []).push({});
+              </script>
+          {{pass}}
+      </div>
       <h5>Activity</h5>
       <div id="carousel-item-3">
         <div class="switch">
@@ -332,11 +404,50 @@
         <div id="calendar_submission" class="center"></div>
         <div id="activity"></div>
       </div>
+      <div>
+          {{if utilities.should_show_stopstalk_ads("profile", actual_handle):}}
+              <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+              <!-- Profile page - before solved problems -->
+              <ins class="adsbygoogle"
+                   style="display:inline-block;width:728px;height:90px"
+                   data-ad-client="ca-pub-5161647280125247"
+                   data-ad-slot="6305082263"></ins>
+              <script>
+                   (adsbygoogle = window.adsbygoogle || []).push({});
+              </script>
+          {{pass}}
+      </div>
       <div id="carousel-item-4">
         <h4>Solved Problems</h4>
         <div id="solved-problems-list" class="row"></div>
+          <div>
+              {{if utilities.should_show_stopstalk_ads("profile", actual_handle):}}
+                  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+                  <!-- Profile page - before unsolved problems -->
+                  <ins class="adsbygoogle"
+                       style="display:inline-block;width:728px;height:90px"
+                       data-ad-client="ca-pub-5161647280125247"
+                       data-ad-slot="1488951424"></ins>
+                  <script>
+                       (adsbygoogle = window.adsbygoogle || []).push({});
+                  </script>
+              {{pass}}
+          </div>
         <h4>Unsolved Problems</h4>
         <div id="unsolved-problems-list" class="row"></div>
+      </div>
+      <div>
+          {{if utilities.should_show_stopstalk_ads("profile", actual_handle):}}
+              <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+              <!-- Profile page - page end -->
+              <ins class="adsbygoogle"
+                   style="display:inline-block;width:728px;height:90px"
+                   data-ad-client="ca-pub-5161647280125247"
+                   data-ad-slot="6421660000"></ins>
+              <script>
+                   (adsbygoogle = window.adsbygoogle || []).push({});
+              </script>
+          {{pass}}
       </div>
     </div>
     {{pass}}
