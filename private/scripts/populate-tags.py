@@ -118,7 +118,7 @@ for problem in problems:
                            tag_id=all_tags[final_tag],
                            problem_id=problem.id)
     if flag:
-        print problem.id, problem.tags, "-->", current_set
+        print(problem.id, problem.tags, "-->", current_set)
 
     for final_tag in this_tags:
         if untagged.has_key(final_tag):
@@ -128,11 +128,11 @@ for problem in problems:
 
 db.commit()
 
-print "\n\n\n=========================== Untagged ===========================\n"
+print("\n\n\n=========================== Untagged ===========================\n")
 
 for a, b in sorted(untagged.items(), key=lambda (k, v): (v, k), reverse=True):
     try:
-        print unicode(a), unicode(b)
+        print(unicode(a), unicode(b))
     except UnicodeEncodeError:
-        print "Can't print this tag"
+        print("Can't print this tag")
         pass

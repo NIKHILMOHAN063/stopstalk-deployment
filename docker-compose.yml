@@ -49,6 +49,7 @@ services:
     volumes:
       - ./mysql-server/scripts:/application/mysql-server/scripts
       - ./:/usr/src/stalk/web2py/applications/stopstalk
+      - ./models/0firstrun.py.sample:/usr/src/stalk/web2py/applications/stopstalk/models/0firstrun.py
       - ./requirements.txt:/usr/src/stalk/web2py/requirements.txt
     depends_on:
       - "redis"

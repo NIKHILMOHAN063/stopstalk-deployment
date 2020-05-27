@@ -72,9 +72,9 @@ def refresh_tags():
 
         gevent.joinall(threads)
 
-    print "Total Inserted: [%d]" % (total_inserted)
-    print "Total Updated: [%d]" % (total_updated)
-    print "Total Not-changed: [%d]" % (not_updated)
+    print("Total Inserted: [%d]" % (total_inserted))
+    print("Total Updated: [%d]" % (total_updated))
+    print("Total Not-changed: [%d]" % (not_updated))
 
 def get_tag(pid, today):
 
@@ -105,14 +105,14 @@ def get_tag(pid, today):
         if prev_tags != str(all_tags) and prev_tags == "['-']":
             row.update_record(tags=str(all_tags),
                               tags_added_on=today)
-            print "Updated", link, prev_tags, "->", all_tags
+            print("Updated", link, prev_tags, "->", all_tags)
             total_updated += 1
         else:
             not_updated += 1
-            print "No-change", link
+            print("No-change", link)
     else:
         total_inserted += 1
-        print "Inserted ", link, all_tags
+        print("Inserted ", link, all_tags)
         # Insert tags in problem table
         # Note: Tags are stored in a stringified list
         #       so that they can be used directly by eval

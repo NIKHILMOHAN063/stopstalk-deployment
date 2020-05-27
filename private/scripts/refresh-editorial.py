@@ -68,9 +68,9 @@ def refresh_editorials():
 
         gevent.joinall(threads)
 
-    print "Total Inserted: [%d]" % (total_inserted)
-    print "Total Updated: [%d]" % (total_updated)
-    print "Total Not-changed: [%d]" % (not_updated)
+    print("Total Inserted: [%d]" % (total_inserted))
+    print("Total Updated: [%d]" % (total_updated))
+    print("Total Not-changed: [%d]" % (not_updated))
 
 def get_editorial(problem_id, today):
 
@@ -98,15 +98,15 @@ def get_editorial(problem_id, today):
         if editorial_link:
             row.update_record(editorial_link=editorial_link,
                               editorial_added_on=today)
-            print "Updated", link, "->", editorial_link
+            print("Updated", link, "->", editorial_link)
             total_updated += 1
         else:
             not_updated += 1
-            print "No-change", link
+            print("No-change", link)
     else:
-        print "****************Should not be here****************"
+        print("****************Should not be here****************")
         total_inserted += 1
-        print "Inserted", link, editorial_link
+        print("Inserted", link, editorial_link)
         # Intentional raising error to fix the issue
         1 / 0
         # Insert editorial_link in problem table
