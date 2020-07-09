@@ -259,7 +259,7 @@ auth.messages.email_sent = T("Verification Email sent")
 auth.messages.logged_out = T("Successfully logged out")
 auth.messages.invalid_login = T("Invalid login credentials")
 auth.messages.label_remember_me = T("Remember credentials")
-auth.settings.long_expiration = 3600 * 24 * 366 # Remember me for a year
+auth.settings.long_expiration = 3600 * 24 * 30 # Remember me for a month
 
 # -----------------------------------------------------------------------------
 def validate_email(email):
@@ -775,6 +775,15 @@ db.define_table("atcoder_problems",
                 Field("problem_identifier"),
                 Field("contest_id"),
                 Field("name"))
+
+db.define_table("problem_recommendations",
+                Field("user_id", "reference auth_user"),
+                Field("problem_id", "reference problem"),
+                # The possible states of a recommendation are:
+                # 0 - Recommended, 1 - Viewed, 2 - Attempted, 3 - Solved
+                Field("state", "integer", default=0),
+                Field("is_active", "boolean"),
+                Field("generated_at", "date"))
 
 uvadb.define_table("problem",
                    Field("problem_id", "integer"),
