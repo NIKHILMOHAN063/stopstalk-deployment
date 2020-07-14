@@ -487,6 +487,8 @@ Referrer: %s\n""" % (form.vars.first_name,
 
 auth.settings.register_onvalidation = [sanitize_fields]
 auth.settings.register_onaccept.append(register_callback)
+auth.settings.registration_requires_verification = False
+auth.settings.login_after_registration = True
 auth.settings.verify_email_onaccept.extend([create_next_retrieval_record,
                                             append_user_to_refreshed_users])
 current.auth = auth
